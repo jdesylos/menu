@@ -70,6 +70,8 @@ terminar.
 
 | Endpoint                               | Descrição                          |
 | -------------------------------------- | ---------------------------------- |
+| `GET /`                                | Identifica a API                   |
+| `GET /status`                          | Atalho para o endpoint de status   |
 | `GET /api/v1/status`                   | Status do sistema e do banco       |
 | `POST /api/v1/users`                   | Cria uma conta                     |
 | `GET /api/v1/users/[username]`         | Dados públicos de um usuário       |
