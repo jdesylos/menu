@@ -82,9 +82,27 @@ terminar.
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
 | `GET /api/v1/migrations`               | Lista as migrations pendentes      |
 | `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
+| `GET /api/v1/tiles/[z]/[x]/[y]`        | Tile vetorial do mapa              |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), então o cliente precisa enviar
 as requisições com credenciais.
+
+### Tiles do mapa
+
+`GET /api/v1/tiles/[z]/[x]/[y]` devolve um tile vetorial (MVT) do basemap da
+[Protomaps](https://protomaps.com/), e é a única rota **pública** da API — ela não passa
+pelo middleware de sessão.
+
+A rota existe para que a chave da Protomaps **nunca saia daqui**. Chave embutida em
+aplicativo nativo sai do pacote com `unzip` e `strings`, e republicar o aplicativo não a
+revoga; na Vercel ela é uma variável de ambiente e a troca é imediata.
+
+Os tiles são recortados para o Brasil a partir do zoom 6 — tile fora da área volta `204`,
+sem gastar cota. O `Cache-Control` guarda um dia no aparelho e trinta no CDN, então o
+mesmo tile pedido por muita gente bate uma vez só na Protomaps.
+
+O dado é da OpenStreetMap sob **ODbL**, que exige atribuição visível: quem desenha o mapa
+precisa mostrar `© OpenStreetMap` na tela.
 
 ## Deploy
 
@@ -118,6 +136,7 @@ enxerga o repositório na hora de importar e cada push já vira um deploy.
 | `EMAIL_SMTP_PORT`     | Provedor de e-mail transacional               |
 | `EMAIL_SMTP_USER`     | Provedor de e-mail transacional               |
 | `EMAIL_SMTP_PASSWORD` | Provedor de e-mail transacional               |
+| `PROTOMAPS_API_KEY`   | Protomaps — chave da API de tiles do mapa     |
 
 Em produção a conexão com o Postgres usa SSL automaticamente; `POSTGRES_CA` só é
 necessário se você quiser validar contra um certificado específico.
