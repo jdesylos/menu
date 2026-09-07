@@ -20,17 +20,21 @@ const SERVED_AREA = {
 // criaria buraco visível sem economizar nada.
 const WORLDWIDE_UNTIL_ZOOM = 5;
 
-function parseCoordinates(rawCoordinates) {
+// `maxZoom` é parâmetro porque nem todo dado para no mesmo zoom: o basemap da
+// Protomaps termina em 15, mas os estabelecimentos vão além disso — e a conta
+// de coordenada é a mesma para os dois. Duas cópias dela divergiriam no dia em
+// que uma fosse corrigida.
+function parseCoordinates(rawCoordinates, { maxZoom = MAX_ZOOM } = {}) {
   const { z, x, y } = rawCoordinates;
 
   const zoom = parseTileInteger(z, "z");
   const column = parseTileInteger(x, "x");
   const row = parseTileInteger(y, "y");
 
-  if (zoom > MAX_ZOOM) {
+  if (zoom > maxZoom) {
     throw new ValidationError({
       message: `O zoom "${zoom}" está acima do máximo disponível.`,
-      action: `Use um zoom entre 0 e ${MAX_ZOOM}.`,
+      action: `Use um zoom entre 0 e ${maxZoom}.`,
     });
   }
 
@@ -67,17 +71,12 @@ function parseTileInteger(value, name) {
 //
 // Não substitui rate limit de verdade, que exige contador compartilhado e
 // ainda não existe aqui.
-function isWithinServedArea({ zoom, column, row }) {
-  if (zoom <= WORLDWIDE_UNTIL_ZOOM) {
+function isWithinServedArea(coordinates) {
+  if (coordinates.zoom <= WORLDWIDE_UNTIL_ZOOM) {
     return true;
   }
 
-  const gridSize = 2 ** zoom;
-  const west = tileColumnToLongitude(column, gridSize);
-  const east = tileColumnToLongitude(column + 1, gridSize);
-  // A grade cresce para o SUL, então a linha `row` é a borda NORTE do tile.
-  const north = tileRowToLatitude(row, gridSize);
-  const south = tileRowToLatitude(row + 1, gridSize);
+  const { west, east, north, south } = bounds(coordinates);
 
   return (
     east > SERVED_AREA.minLongitude &&
@@ -85,6 +84,23 @@ function isWithinServedArea({ zoom, column, row }) {
     north > SERVED_AREA.minLatitude &&
     south < SERVED_AREA.maxLatitude
   );
+}
+
+// A caixa de lat/lon que um tile cobre.
+//
+// Exportada porque a rota de estabelecimentos pergunta exatamente isto ao
+// banco — "o que existe dentro deste tile" —, e refazer a conversão lá seria a
+// segunda conta que diverge da primeira.
+function bounds({ zoom, column, row }) {
+  const gridSize = 2 ** zoom;
+
+  return {
+    west: tileColumnToLongitude(column, gridSize),
+    east: tileColumnToLongitude(column + 1, gridSize),
+    // A grade cresce para o SUL, então a linha `row` é a borda NORTE do tile.
+    north: tileRowToLatitude(row, gridSize),
+    south: tileRowToLatitude(row + 1, gridSize),
+  };
 }
 
 function tileColumnToLongitude(column, gridSize) {
@@ -144,6 +160,7 @@ const tile = {
   MAX_ZOOM,
   parseCoordinates,
   isWithinServedArea,
+  bounds,
   fetchVectorTile,
 };
 
