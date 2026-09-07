@@ -64,6 +64,7 @@ terminar.
 | `npm run migrations:create` | Cria uma nova migration                             |
 | `npm run migrations:up`     | Aplica as migrations pendentes                      |
 | `npm run lint:prettier:fix` | Formata o código                                    |
+| `npm run places:import`     | Carrega estabelecimentos do Overture no banco       |
 | `npm run commit`            | Commit guiado pelo Commitizen                       |
 
 ## API
@@ -103,6 +104,37 @@ mesmo tile pedido por muita gente bate uma vez só na Protomaps.
 
 O dado é da OpenStreetMap sob **ODbL**, que exige atribuição visível: quem desenha o mapa
 precisa mostrar `© OpenStreetMap` na tela.
+
+### Estabelecimentos
+
+`GET /api/v1/places/[z]/[x]/[y]` devolve, em JSON, os lugares de comer dentro daquele
+tile. Também é **pública**, pelo mesmo motivo dos tiles: o mapa não depende de quem está
+olhando, e uma sessão vencida não pode fazer os restaurantes sumirem da tela.
+
+```json
+{
+  "places": [
+    {
+      "name": "Pizzaria Calipso",
+      "category": "pizza_restaurant",
+      "latitude": -23.5351,
+      "longitude": -46.4654
+    }
+  ]
+}
+```
+
+Endereçada por tile, e não por raio, porque é assim que o aplicativo já pede o mapa — ele
+tem cache por tile e descarta o que saiu da tela. Zoom aceito: **14 a 18** (abaixo disso um
+tile cobre uma cidade inteira), com teto de 300 lugares por tile.
+
+A rota existe porque o basemap não basta. Os POIs que vêm no tile da Protomaps saem do
+OpenStreetMap, e a cobertura dele na periferia é escassa: num raio de 1 km em Itaquera, o
+OSM tinha **um** estabelecimento, e o Overture tinha **229** no mesmo lugar.
+
+O dado é do [Overture Maps](https://overturemaps.org/) sob **CDLA-Permissive 2.0** —
+licença permissiva, uso comercial liberado e **sem obrigação de atribuição na tela**,
+diferente do ODbL do basemap.
 
 ## Deploy
 
@@ -150,6 +182,40 @@ tenha a feature `create:migration`:
 curl -X POST https://SEU-DEPLOY.vercel.app/api/v1/migrations \
   -H "Cookie: session_id=SEU_TOKEN"
 ```
+
+### 4. Estabelecimentos em produção
+
+A tabela `places` nasce vazia: a migration cria a estrutura, o dado entra por carga. Não
+há rota de escrita para isso de propósito — é uma carga de centenas de milhares de linhas,
+feita algumas vezes por ano, e uma rota que aceitasse isso seria um caminho de escrita em
+massa aberto na API.
+
+A carga roda **da sua máquina, apontando para a Neon**. Primeiro, baixe o recorte da
+região com o CLI do Overture (Python, ferramenta de desenvolvimento — não é dependência
+deste projeto):
+
+```bash
+pip install overturemaps
+
+# a caixa é oeste,sul,leste,norte — esta cobre a Grande São Paulo
+overturemaps download --bbox=-46.83,-24.01,-46.36,-23.35 \
+  -f geojsonseq --type=place -o sao-paulo.geojsonseq
+```
+
+Depois carregue, com as variáveis apontando para a Neon (as mesmas da Vercel):
+
+```bash
+POSTGRES_HOST=... POSTGRES_PORT=5432 POSTGRES_USER=... \
+POSTGRES_PASSWORD=... POSTGRES_DB=... NODE_ENV=production \
+  npm run places:import -- sao-paulo.geojsonseq
+```
+
+`NODE_ENV=production` liga o SSL exigido pela Neon. O script filtra as categorias de
+comida, ignora o que não tem nome e faz **upsert** por `(source, source_id)` — rodar de
+novo no release seguinte do Overture atualiza o que mudou, sem duplicar. Um lugar que sai
+do dado permanece na tabela até ser removido à mão.
+
+O Overture publica um release por mês; recarregar a cada poucos meses basta.
 
 ## Commits
 
