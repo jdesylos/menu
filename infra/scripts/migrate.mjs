@@ -27,14 +27,19 @@ import migrationRunner from "node-pg-migrate";
 import database from "../database.js";
 
 async function main() {
+  if (shouldSkip()) {
+    return;
+  }
+
+  // O host ANTES de conectar, não depois: numa falha de conexão o `console.log`
+  // lá embaixo nunca chegaria a rodar, e era justamente o caso em que saber o
+  // destino importa. `undefined` aqui já diz que falta `POSTGRES_HOST` no
+  // ambiente — que é como o `pg` acaba tentando o localhost.
+  console.log(`🔷 Migrando ${process.env.POSTGRES_HOST}...`);
+
   const client = await database.getNewClient();
 
   try {
-    // O host no log é de propósito: é a única forma de ver, no log do build,
-    // contra QUAL banco a migration rodou. Sem isso, uma variável de ambiente
-    // errada migra o banco errado em silêncio.
-    console.log(`🔷 Migrando ${process.env.POSTGRES_HOST}...`);
-
     const migrated = await migrationRunner({
       dbClient: client,
       dir: resolve("infra", "migrations"),
@@ -54,6 +59,29 @@ async function main() {
   } finally {
     await client.end();
   }
+}
+
+// Só produção migra.
+//
+// A Vercel roda o build em TODO deploy, inclusive no preview de cada PR, e
+// `VERCEL_ENV` é o que diz qual é qual. Migrar no preview tem dois problemas: a
+// migration de um PR que ainda não foi revisado seria aplicada ao banco que
+// aquele ambiente apontar, e — quando as variáveis do banco existem só para
+// Production, que é o arranjo normal — o preview não tem onde conectar e o
+// build morre com `ECONNREFUSED` em `127.0.0.1`.
+//
+// Fora da Vercel a variável não existe, e aí não se pula nada: é o caminho de
+// quem roda `npm run migrations:up` na própria máquina, apontando para onde
+// quiser.
+function shouldSkip() {
+  const environment = process.env.VERCEL_ENV;
+
+  if (!environment || environment === "production") {
+    return false;
+  }
+
+  console.log(`🔵 Deploy de ${environment}: migrações puladas.`);
+  return true;
 }
 
 // `exit(1)` derruba o build de propósito. Publicar código que espera uma

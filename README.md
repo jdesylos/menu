@@ -193,13 +193,18 @@ as mesmas variáveis que a aplicação usa, já configuradas na Vercel. Se a mig
 falhar, o script sai com código 1 e **o deploy é abortado**: publicar código que espera
 uma coluna inexistente é pior que não publicar.
 
-O log do build mostra contra qual host a migration rodou. Vale conferir na primeira vez —
-uma variável de ambiente errada migraria o banco errado em silêncio.
+O log do build mostra o host de destino **antes** de conectar. Vale conferir na primeira
+vez: uma variável errada migraria o banco errado em silêncio, e um `undefined` ali diz na
+hora que falta `POSTGRES_HOST` no ambiente.
 
-> **Preview também migra.** A Vercel roda o build em todo deploy, inclusive nos de
-> preview de cada PR. Se o ambiente de preview usa as mesmas variáveis do de produção, a
-> migration de um PR ainda não mergeado é aplicada em produção. Para separar, defina as
-> `POSTGRES_*` do ambiente **Preview** apontando para outro banco.
+**Só produção migra.** A Vercel roda o build em todo deploy, inclusive no preview de cada
+PR, e o script lê `VERCEL_ENV` para pular os que não são de produção. São dois motivos: a
+migration de um PR ainda não revisado não deve tocar em banco nenhum, e as `POSTGRES_*`
+normalmente existem só no ambiente **Production** — sem elas o preview não tem onde
+conectar e o build morreria com `ECONNREFUSED` em `127.0.0.1`.
+
+Fora da Vercel a variável não existe, e aí nada é pulado: `npm run migrations:up` na sua
+máquina migra o banco que as `POSTGRES_*` do seu ambiente apontarem.
 
 A rota continua existindo para aplicar migrations sem um deploy novo — ela precisa de um
 usuário com a feature `create:migration`:
