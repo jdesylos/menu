@@ -64,7 +64,7 @@ terminar.
 | `npm run migrations:create` | Cria uma nova migration                             |
 | `npm run migrations:up`     | Aplica as migrations pendentes                      |
 | `npm run lint:prettier:fix` | Formata o código                                    |
-| `npm run places:import`     | Carrega estabelecimentos do Overture no banco       |
+| `npm run places:import`     | Baixa e carrega os estabelecimentos do Overture     |
 | `npm run commit`            | Commit guiado pelo Commitizen                       |
 
 ## API
@@ -136,6 +136,11 @@ O dado é do [Overture Maps](https://overturemaps.org/) sob **CDLA-Permissive 2.
 licença permissiva, uso comercial liberado e **sem obrigação de atribuição na tela**,
 diferente do ODbL do basemap.
 
+O que conta como "lugar de comer" é uma **lista explícita** de categorias na consulta de
+`infra/scripts/import-places.sh`, mais o sufixo `_restaurant`. A taxonomia do Overture tem
+1508 categorias só no Brasil, e casar por pedaço de nome não funciona: procurar `bar`
+traz `barber`, e `pub` traz `public_school` e `notary_public`.
+
 ## Deploy
 
 O banco fica na **Neon** e a API na **Vercel**. Em ambos, entre com **"Continue with
@@ -190,32 +195,45 @@ há rota de escrita para isso de propósito — é uma carga de centenas de milh
 feita algumas vezes por ano, e uma rota que aceitasse isso seria um caminho de escrita em
 massa aberto na API.
 
-A carga roda **da sua máquina, apontando para a Neon**. Primeiro, baixe o recorte da
-região com o CLI do Overture (Python, ferramenta de desenvolvimento — não é dependência
-deste projeto):
+A carga roda **da sua máquina, apontando para a Neon**, e cobre o Brasil inteiro. O único
+requisito é o DuckDB (ferramenta de desenvolvimento; não é dependência deste projeto):
 
 ```bash
-pip install overturemaps
+brew install duckdb
 
-# a caixa é oeste,sul,leste,norte — esta cobre a Grande São Paulo
-overturemaps download --bbox=-46.83,-24.01,-46.36,-23.35 \
-  -f geojsonseq --type=place -o sao-paulo.geojsonseq
-```
-
-Depois carregue, com as variáveis apontando para a Neon (as mesmas da Vercel):
-
-```bash
 POSTGRES_HOST=... POSTGRES_PORT=5432 POSTGRES_USER=... \
 POSTGRES_PASSWORD=... POSTGRES_DB=... NODE_ENV=production \
-  npm run places:import -- sao-paulo.geojsonseq
+  npm run places:import
 ```
 
-`NODE_ENV=production` liga o SSL exigido pela Neon. O script filtra as categorias de
-comida, ignora o que não tem nome e faz **upsert** por `(source, source_id)` — rodar de
-novo no release seguinte do Overture atualiza o que mudou, sem duplicar. Um lugar que sai
-do dado permanece na tabela até ser removido à mão.
+`NODE_ENV=production` liga o SSL exigido pela Neon.
 
-O Overture publica um release por mês; recarregar a cada poucos meses basta.
+O DuckDB lê o GeoParquet do Overture direto no S3 e **filtra lá**, trazendo só as cinco
+colunas que interessam e só as linhas de comida do Brasil: cerca de **100 MB e dois
+minutos**, contra os ~10 GB que o CLI `overturemaps --bbox` baixaria para chegar ao mesmo
+resultado — ele traz farmácia, dentista e igreja com todas as propriedades, para filtrar
+depois na sua máquina.
+
+O que entra na tabela são ~600 mil estabelecimentos, ocupando cerca de **200 MB** com os
+índices. Vale conferir contra o limite de armazenamento do seu plano na Neon.
+
+Para recarregar só uma região, ou outro país, estreite pelo ambiente:
+
+```bash
+OESTE=-47 SUL=-24 LESTE=-46 NORTE=-23 npm run places:import
+```
+
+O import faz **upsert** por `(source, source_id)` — rodar de novo no release seguinte do
+Overture atualiza o que mudou, sem duplicar. Um lugar que sai do dado permanece na tabela
+até ser removido à mão.
+
+O release do Overture é fixado no script (`OVERTURE_RELEASE`), para que duas cargas feitas
+em semanas diferentes carreguem o mesmo dado. Eles publicam um release por mês;
+recarregar a cada poucos meses basta.
+
+**Nada disso roda sozinho**: não há agendamento, pelo mesmo motivo que as migrations
+também são disparadas à mão — automatizar exigiria dar credencial de escrita em massa no
+banco de produção a um runner de CI, para um job que roda poucas vezes por ano.
 
 ## Commits
 
