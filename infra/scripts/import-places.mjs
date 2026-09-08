@@ -1,88 +1,52 @@
-// Carrega estabelecimentos do Overture Places no banco.
+// Carrega no banco o CSV de estabelecimentos que o `import-places.sh` extraiu.
 //
-// # De onde vem o arquivo
+// # O que ele NÃO faz
 //
-// O Overture publica em GeoParquet no S3, e o jeito mais simples de recortar
-// uma região é o CLI oficial (Python), que NÃO é dependência deste projeto —
-// roda uma vez por release, na máquina de quem carrega:
+// Não filtra nada. O que decide o que é lugar de comer é a consulta do
+// `import-places.sh`, e é lá que a lista de categorias vive — uma segunda cópia
+// dela aqui divergiria da primeira no dia em que alguém corrigisse só uma.
 //
-//   pip install overturemaps
-//   overturemaps download --bbox=-46.83,-24.01,-46.36,-23.35 \
-//     -f geojsonseq --type=place -o sao-paulo.geojsonseq
+// Este script existe separado por dois motivos: dá para recarregar um CSV já
+// extraído sem falar com o S3 de novo, e o acesso ao Postgres continua onde já
+// estava, no `pg` que o projeto usa em todo o resto.
 //
-// `geojsonseq` (uma feature por linha) e não `geojson`: o arquivo de uma
-// cidade grande passa de um giga, e um JSON único obrigaria a carregá-lo
-// inteiro na memória para ler a primeira linha.
+// # Uso
 //
-// # Como rodar
+//   node infra/scripts/import-places.mjs <arquivo.csv>
 //
-//   node infra/scripts/import-places.mjs sao-paulo.geojsonseq
-//
-// As credenciais saem das mesmas variáveis de ambiente que a aplicação usa
-// (POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER, POSTGRES_DB,
-// POSTGRES_PASSWORD). Apontando-as para o Neon, o mesmo comando carrega
-// produção — ver o README.
+// Normalmente quem chama é o `import-places.sh`, que extrai e carrega numa
+// tacada. As credenciais saem das mesmas variáveis de ambiente da aplicação.
 //
 // # Por que é idempotente
 //
 // O `ON CONFLICT` usa (source, source_id): rodar o import do release seguinte
 // ATUALIZA o que mudou em vez de duplicar. Um lugar que sai do Overture
 // permanece no banco até alguém removê-lo — some do dado, não da tabela.
-
-// `.mjs` e não `.js`: o `package.json` não declara `type: module`, e um script
-// com `import` num `.js` faz o Node reprocessar o arquivo e avisar. A extensão
-// resolve sem mexer no resto do projeto, que é CommonJS fora do Next.
 //
-// O Node ainda avisa uma vez sobre o `infra/database.js`, que é ESM dentro do
-// mesmo pacote sem `type`. É ruído, não erro: o import funciona, e o preço é
-// um reparse de um arquivo pequeno num script que roda algumas vezes por ano.
+// `.mjs` e não `.js`: o `package.json` não declara `type: module`, e um script
+// com `import` num `.js` faz o Node reprocessar o arquivo e avisar.
+
 import fs from "node:fs";
 import readline from "node:readline";
 import database from "../database.js";
 
-// O que conta como "onde se come".
-//
-// A taxonomia do Overture tem centenas de categorias, quase todas compostas
-// (`pizza_restaurant`, `japanese_restaurant`, `coffee_shop`). Casar por pedaço
-// do nome cobre o conjunto inteiro sem enumerar uma lista que envelheceria a
-// cada release deles.
-// Categorias que casariam por acidente e não são lugar de comer. "bar" pega
-// tabacaria e casa de narguilé; o ícone do aplicativo é garfo e faca, e ele
-// mentiria sobre elas.
-const NOT_FOOD_CATEGORIES = ["hookah", "shisha", "tobacco", "smoke_shop"];
-
-const FOOD_CATEGORY_PARTS = [
-  "restaurant",
-  "food",
-  "bar",
-  "pub",
-  "cafe",
-  "coffee",
-  "pizza",
-  "bakery",
-  "steak",
-  "diner",
-  "brewery",
-  "ice_cream",
-  "dessert",
-  "snack",
-  "juice",
-];
-
 // Quantas linhas por INSERT. Quinhentas mantêm a consulta abaixo do limite de
-// parâmetros do Postgres com folga, e ainda assim fazem uma cidade inteira
-// entrar em poucos minutos.
+// parâmetros do Postgres com folga, e ainda assim fazem o país inteiro entrar
+// em poucos minutos.
 const BATCH_SIZE = 500;
 
 const SOURCE = "overture";
+
+// A ordem das colunas que o `import-places.sh` escreve. Conferida contra o
+// cabeçalho do arquivo antes de ler qualquer linha: um CSV com outra ordem
+// carregaria latitude no lugar do nome, sem erro nenhum.
+const COLUMNS = ["source_id", "name", "category", "latitude", "longitude"];
 
 async function main() {
   const filePath = process.argv[2];
 
   if (!filePath) {
-    console.error(
-      "uso: node infra/scripts/import-places.mjs <arquivo.geojsonseq>",
-    );
+    console.error("uso: node infra/scripts/import-places.mjs <arquivo.csv>");
     process.exit(1);
   }
 
@@ -95,12 +59,19 @@ async function main() {
   let batch = [];
   let imported = 0;
   let skipped = 0;
+  let header = null;
 
   try {
     for await (const line of stream) {
       if (!line.trim()) continue;
 
-      const place = parseFeature(line);
+      if (header === null) {
+        header = parseLine(line);
+        assertHeader(header);
+        continue;
+      }
+
+      const place = parseRow(parseLine(line));
       if (!place) {
         skipped++;
         continue;
@@ -112,7 +83,7 @@ async function main() {
         await upsert(client, batch);
         imported += batch.length;
         batch = [];
-        process.stdout.write(`\r${imported} estabelecimentos...`);
+        process.stdout.write(`\r      ${imported} carregados...`);
       }
     }
 
@@ -124,57 +95,80 @@ async function main() {
     await client.end();
   }
 
-  console.log(
-    `\n${imported} estabelecimentos carregados, ${skipped} ignorados`,
-  );
+  console.log(`\r      ${imported} carregados, ${skipped} ignorados`);
 }
 
-// Uma linha do arquivo vira um lugar — ou `null`, quando não é comida, não tem
-// nome ou não tem ponto.
-//
-// Sem nome não entra: o mapa desenha o nome ao lado do ícone, e um marcador
-// anônimo ocupa o lugar de um que diz alguma coisa.
-function parseFeature(line) {
-  let feature;
-  try {
-    feature = JSON.parse(line);
-  } catch {
+function assertHeader(header) {
+  const igual =
+    header.length === COLUMNS.length &&
+    COLUMNS.every((coluna, i) => header[i] === coluna);
+
+  if (!igual) {
+    console.error(
+      `erro: cabeçalho inesperado.\n  esperado: ${COLUMNS.join(",")}\n  veio:     ${header.join(",")}`,
+    );
+    process.exit(1);
+  }
+}
+
+// CSV do DuckDB: aspas duplas quando o campo tem vírgula ou aspas, e aspas
+// dobradas por escape. Uma dependência de parser resolveria o caso geral, mas
+// este arquivo é gerado por nós, com formato conhecido — e o projeto não ganha
+// uma dependência por causa de um script.
+function parseLine(line) {
+  const fields = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (quoted) {
+      if (char === '"') {
+        if (line[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      fields.push(field);
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+
+  fields.push(field);
+  return fields;
+}
+
+function parseRow(fields) {
+  if (fields.length !== COLUMNS.length) {
     return null;
   }
 
-  const properties = feature?.properties;
-  const coordinates = feature?.geometry?.coordinates;
+  const [sourceId, name, category, rawLatitude, rawLongitude] = fields;
+  const latitude = Number(rawLatitude);
+  const longitude = Number(rawLongitude);
 
-  if (!properties || !Array.isArray(coordinates)) {
+  if (!sourceId || !name) {
     return null;
   }
 
-  const name = properties.names?.primary;
-  const category = properties.categories?.primary;
-  const sourceId = properties.id;
-
-  if (!name || !sourceId || !isFood(category)) {
-    return null;
-  }
-
-  const [longitude, latitude] = coordinates;
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
 
-  return { sourceId, name, category, latitude, longitude };
-}
-
-function isFood(category) {
-  if (typeof category !== "string") {
-    return false;
-  }
-
-  if (NOT_FOOD_CATEGORIES.some((part) => category.includes(part))) {
-    return false;
-  }
-
-  return FOOD_CATEGORY_PARTS.some((part) => category.includes(part));
+  return { sourceId, name, category: category || null, latitude, longitude };
 }
 
 async function upsert(client, places) {
