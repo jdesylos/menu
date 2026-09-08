@@ -62,7 +62,8 @@ terminar.
 | `npm run services:stop`     | Para os containers                                  |
 | `npm run services:down`     | Remove os containers                                |
 | `npm run migrations:create` | Cria uma nova migration                             |
-| `npm run migrations:up`     | Aplica as migrations pendentes                      |
+| `npm run migrations:up:dev` | Aplica as migrations no banco local                 |
+| `npm run migrations:up`     | Aplica as migrations lendo `POSTGRES_*` do ambiente |
 | `npm run lint:prettier:fix` | Formata o código                                    |
 | `npm run places:import`     | Baixa e carrega os estabelecimentos do Overture     |
 | `npm run commit`            | Commit guiado pelo Commitizen                       |
@@ -180,8 +181,33 @@ necessário se você quiser validar contra um certificado específico.
 
 ### 3. Migrations em produção
 
-Depois do primeiro deploy, aplique as migrations chamando o endpoint com um usuário que
-tenha a feature `create:migration`:
+**Rodam sozinhas, a cada deploy.** A Vercel executa o script `vercel-build` no lugar do
+`build` quando ele existe, e o nosso é:
+
+```json
+"vercel-build": "npm run migrations:up && next build"
+```
+
+`migrations:up` chama `infra/scripts/migrate.mjs`, que lê as `POSTGRES_*` do ambiente —
+as mesmas variáveis que a aplicação usa, já configuradas na Vercel. Se a migration
+falhar, o script sai com código 1 e **o deploy é abortado**: publicar código que espera
+uma coluna inexistente é pior que não publicar.
+
+O log do build mostra o host de destino **antes** de conectar. Vale conferir na primeira
+vez: uma variável errada migraria o banco errado em silêncio, e um `undefined` ali diz na
+hora que falta `POSTGRES_HOST` no ambiente.
+
+**Só produção migra.** A Vercel roda o build em todo deploy, inclusive no preview de cada
+PR, e o script lê `VERCEL_ENV` para pular os que não são de produção. São dois motivos: a
+migration de um PR ainda não revisado não deve tocar em banco nenhum, e as `POSTGRES_*`
+normalmente existem só no ambiente **Production** — sem elas o preview não tem onde
+conectar e o build morreria com `ECONNREFUSED` em `127.0.0.1`.
+
+Fora da Vercel a variável não existe, e aí nada é pulado: `npm run migrations:up` na sua
+máquina migra o banco que as `POSTGRES_*` do seu ambiente apontarem.
+
+A rota continua existindo para aplicar migrations sem um deploy novo — ela precisa de um
+usuário com a feature `create:migration`:
 
 ```bash
 curl -X POST https://SEU-DEPLOY.vercel.app/api/v1/migrations \
