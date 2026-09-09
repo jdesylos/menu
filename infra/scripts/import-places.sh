@@ -65,15 +65,63 @@ echo "[1/2] Extraindo do Overture (release $RELEASE)..."
 # loja), `food_delivery_service` (não tem salão para visitar) e
 # `food_beverage_service_distribution` (é atacado).
 duckdb <<SQL
-INSTALL httpfs; LOAD httpfs; SET s3_region='us-west-2';
+INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-west-2';
+
+-- Os bairros, do tema `divisions` do mesmo Overture.
+--
+-- Bairro NÃO é campo de endereço: `addresses[1]` traz rua, cidade, estado e
+-- CEP, e o bairro só aparece — às vezes, em formato livre — dentro da rua. Como
+-- linha de baixo na busca ("Bela Vista, São Paulo") ele é o que identifica o
+-- lugar, então vem daqui: o polígono que contém o ponto do estabelecimento.
+--
+-- Os três subtipos juntos porque o Overture não usa um só. Em São Paulo o que
+-- existe é `macrohood` ("Morumbi"); em outras cidades, `neighborhood`. O
+-- desempate está na consulta abaixo, do mais específico para o mais geral.
+CREATE TEMP TABLE bairros AS
+SELECT
+  names.primary AS neighborhood,
+  CASE subtype
+    WHEN 'microhood' THEN 0
+    WHEN 'neighborhood' THEN 1
+    ELSE 2
+  END AS especificidade,
+  geometry
+FROM read_parquet(
+  's3://overturemaps-us-west-2/release/$RELEASE/theme=divisions/type=division_area/*',
+  hive_partitioning = 1
+)
+WHERE country = '$PAIS'
+  AND subtype IN ('microhood', 'neighborhood', 'macrohood')
+  AND names.primary IS NOT NULL;
 
 COPY (
+  SELECT
+    p.source_id,
+    p.name,
+    p.category,
+    p.latitude,
+    p.longitude,
+    -- O bairro do polígono mais específico que contém o ponto. Um lugar cai
+    -- dentro de vários (o `neighborhood` mora dentro do `macrohood`), e é o
+    -- menor deles que diz alguma coisa a quem procura.
+    (
+      SELECT b.neighborhood
+      FROM bairros b
+      WHERE ST_Contains(b.geometry, ST_Point(p.longitude, p.latitude))
+      ORDER BY b.especificidade
+      LIMIT 1
+    ) AS neighborhood,
+    p.locality,
+    p.region
+  FROM (
   SELECT
     id AS source_id,
     names.primary AS name,
     categories.primary AS category,
     bbox.ymin AS latitude,
-    bbox.xmin AS longitude
+    bbox.xmin AS longitude,
+    addresses[1].locality AS locality,
+    addresses[1].region AS region
   FROM read_parquet(
     's3://overturemaps-us-west-2/release/$RELEASE/theme=places/type=place/*',
     hive_partitioning = 1
@@ -93,6 +141,7 @@ COPY (
         'bistro','hotel_bar','cafeteria','pie_shop','whiskey_bar','beach_bar'
       )
     )
+  ) p
 ) TO '$CSV' (FORMAT CSV, HEADER);
 SQL
 
