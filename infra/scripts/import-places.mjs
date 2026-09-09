@@ -40,7 +40,16 @@ const SOURCE = "overture";
 // A ordem das colunas que o `import-places.sh` escreve. Conferida contra o
 // cabeçalho do arquivo antes de ler qualquer linha: um CSV com outra ordem
 // carregaria latitude no lugar do nome, sem erro nenhum.
-const COLUMNS = ["source_id", "name", "category", "latitude", "longitude"];
+const COLUMNS = [
+  "source_id",
+  "name",
+  "category",
+  "latitude",
+  "longitude",
+  "neighborhood",
+  "locality",
+  "region",
+];
 
 async function main() {
   const filePath = process.argv[2];
@@ -156,7 +165,16 @@ function parseRow(fields) {
     return null;
   }
 
-  const [sourceId, name, category, rawLatitude, rawLongitude] = fields;
+  const [
+    sourceId,
+    name,
+    category,
+    rawLatitude,
+    rawLongitude,
+    neighborhood,
+    locality,
+    region,
+  ] = fields;
   const latitude = Number(rawLatitude);
   const longitude = Number(rawLongitude);
 
@@ -168,13 +186,30 @@ function parseRow(fields) {
     return null;
   }
 
-  return { sourceId, name, category: category || null, latitude, longitude };
+  // Campo de endereço vazio vira nulo, e não string vazia: os dois viram a
+  // mesma coisa na tela, mas só o nulo diz "o Overture não sabe" quando alguém
+  // for medir a cobertura do dado.
+  return {
+    sourceId,
+    name,
+    category: category || null,
+    latitude,
+    longitude,
+    neighborhood: neighborhood || null,
+    locality: locality || null,
+    region: region || null,
+  };
 }
+
+// Quantos parâmetros cada linha ocupa no INSERT — a fonte mais as colunas do
+// CSV. Contar aqui em vez de escrever o número faz a conta acompanhar a lista
+// quando ela crescer de novo.
+const PARAMS_PER_ROW = 1 + COLUMNS.length;
 
 async function upsert(client, places) {
   const values = [];
   const rows = places.map((place, index) => {
-    const offset = index * 6;
+    const offset = index * PARAMS_PER_ROW;
     values.push(
       SOURCE,
       place.sourceId,
@@ -182,15 +217,26 @@ async function upsert(client, places) {
       place.category,
       place.latitude,
       place.longitude,
+      place.neighborhood,
+      place.locality,
+      place.region,
     );
 
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6})`;
+    const params = Array.from(
+      { length: PARAMS_PER_ROW },
+      (_, i) => `$${offset + i + 1}`,
+    );
+
+    return `(${params.join(", ")})`;
   });
 
   await client.query({
     text: `
       INSERT INTO
-        places (source, source_id, name, category, latitude, longitude)
+        places (
+          source, source_id, name, category, latitude, longitude,
+          neighborhood, locality, region
+        )
       VALUES
         ${rows.join(", ")}
       ON CONFLICT
@@ -200,6 +246,9 @@ async function upsert(client, places) {
         category = EXCLUDED.category,
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
+        neighborhood = EXCLUDED.neighborhood,
+        locality = EXCLUDED.locality,
+        region = EXCLUDED.region,
         updated_at = timezone('utc', now())
     ;`,
     values,
