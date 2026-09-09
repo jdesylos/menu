@@ -64,19 +64,28 @@ echo "[1/2] Extraindo do Overture (release $RELEASE)..."
 # Ficam DE FORA de propósito: `health_food_store` e `specialty_foods` (são
 # loja), `food_delivery_service` (não tem salão para visitar) e
 # `food_beverage_service_distribution` (é atacado).
+# O heredoc NÃO é citado de propósito — $RELEASE, $PAIS e a caixa do país
+# precisam ser substituídos pelo shell antes de o DuckDB ver a consulta. O preço
+# é que crase aqui dentro vira execução de comando: os comentários SQL abaixo
+# usam aspas, e nunca crase.
 duckdb <<SQL
 INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-west-2';
 
--- Os bairros, do tema `divisions` do mesmo Overture.
+-- Os bairros, do tema "divisions" do mesmo Overture.
 --
--- Bairro NÃO é campo de endereço: `addresses[1]` traz rua, cidade, estado e
+-- Bairro NÃO é campo de endereço: addresses[1] traz rua, cidade, estado e
 -- CEP, e o bairro só aparece — às vezes, em formato livre — dentro da rua. Como
 -- linha de baixo na busca ("Bela Vista, São Paulo") ele é o que identifica o
 -- lugar, então vem daqui: o polígono que contém o ponto do estabelecimento.
 --
+-- A caixa vem primeiro, e não é redundante com o país: é ela que deixa o
+-- DuckDB pular arquivo inteiro pela estatística, sem abrir a geometria. Sem a
+-- caixa, filtrar por country obriga a varrer os polígonos do mundo todo — mais
+-- de um gigabyte descendo do S3 para achar os bairros do Brasil.
+--
 -- Os três subtipos juntos porque o Overture não usa um só. Em São Paulo o que
--- existe é `macrohood` ("Morumbi"); em outras cidades, `neighborhood`. O
--- desempate está na consulta abaixo, do mais específico para o mais geral.
+-- existe é o "macrohood" ("Morumbi"); em outras cidades, o "neighborhood".
+-- O desempate está na consulta abaixo, do mais específico para o mais geral.
 CREATE TEMP TABLE bairros AS
 SELECT
   names.primary AS neighborhood,
@@ -90,7 +99,9 @@ FROM read_parquet(
   's3://overturemaps-us-west-2/release/$RELEASE/theme=divisions/type=division_area/*',
   hive_partitioning = 1
 )
-WHERE country = '$PAIS'
+WHERE bbox.xmin BETWEEN $OESTE AND $LESTE
+  AND bbox.ymin BETWEEN $SUL AND $NORTE
+  AND country = '$PAIS'
   AND subtype IN ('microhood', 'neighborhood', 'macrohood')
   AND names.primary IS NOT NULL;
 
@@ -102,7 +113,7 @@ COPY (
     p.latitude,
     p.longitude,
     -- O bairro do polígono mais específico que contém o ponto. Um lugar cai
-    -- dentro de vários (o `neighborhood` mora dentro do `macrohood`), e é o
+    -- dentro de vários (o "neighborhood" mora dentro do "macrohood"), e é o
     -- menor deles que diz alguma coisa a quem procura.
     (
       SELECT b.neighborhood
