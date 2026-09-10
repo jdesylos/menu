@@ -47,6 +47,8 @@ const COLUMNS = [
   "latitude",
   "longitude",
   "neighborhood",
+  "street",
+  "postcode",
   "locality",
   "region",
 ];
@@ -172,6 +174,8 @@ function parseRow(fields) {
     rawLatitude,
     rawLongitude,
     neighborhood,
+    street,
+    postcode,
     locality,
     region,
   ] = fields;
@@ -196,6 +200,8 @@ function parseRow(fields) {
     latitude,
     longitude,
     neighborhood: neighborhood || null,
+    street: street || null,
+    postcode: postcode || null,
     locality: locality || null,
     region: region || null,
   };
@@ -218,6 +224,8 @@ async function upsert(client, places) {
       place.latitude,
       place.longitude,
       place.neighborhood,
+      place.street,
+      place.postcode,
       place.locality,
       place.region,
     );
@@ -235,7 +243,7 @@ async function upsert(client, places) {
       INSERT INTO
         places (
           source, source_id, name, category, latitude, longitude,
-          neighborhood, locality, region
+          neighborhood, street, postcode, locality, region
         )
       VALUES
         ${rows.join(", ")}
@@ -247,6 +255,8 @@ async function upsert(client, places) {
         latitude = EXCLUDED.latitude,
         longitude = EXCLUDED.longitude,
         neighborhood = EXCLUDED.neighborhood,
+        street = EXCLUDED.street,
+        postcode = EXCLUDED.postcode,
         locality = EXCLUDED.locality,
         region = EXCLUDED.region,
         updated_at = timezone('utc', now())

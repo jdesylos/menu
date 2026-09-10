@@ -138,9 +138,11 @@ async function search({ term, latitude, longitude }) {
         category,
         latitude,
         longitude,
+        street,
         neighborhood,
         locality,
-        region
+        region,
+        postcode
       FROM
         places
       WHERE
@@ -163,6 +165,15 @@ function escapeLike(term) {
   return term.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
+// O endereço viaja no TILE, e não só na busca.
+//
+// O aplicativo abre um painel quando se toca no marcador do restaurante, e o
+// endereço é o conteúdo dele. Os marcadores vêm daqui — do tile —, então sem o
+// endereço nesta consulta o painel teria de fazer uma segunda requisição por
+// toque, para buscar pelo nome um lugar que ele já tem na mão.
+//
+// Custa cerca de sessenta bytes por lugar: uns dez quilobytes num tile cheio,
+// que a borda guarda por trinta dias junto do resto da resposta.
 async function findWithinTile(coordinates) {
   const { west, east, south, north } = tile.bounds(coordinates);
 
@@ -172,7 +183,12 @@ async function findWithinTile(coordinates) {
         name,
         category,
         latitude,
-        longitude
+        longitude,
+        street,
+        neighborhood,
+        locality,
+        region,
+        postcode
       FROM
         places
       WHERE

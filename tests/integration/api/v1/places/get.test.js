@@ -80,8 +80,56 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
           category: "bar",
           latitude: -23.5505,
           longitude: -46.6333,
+          // O endereço viaja no tile para o painel do aplicativo não precisar
+          // de uma segunda requisição por toque. Nulo aqui porque este lugar
+          // foi plantado sem ele.
+          street: null,
+          neighborhood: null,
+          locality: null,
+          region: null,
+          postcode: null,
         },
       ]);
+    });
+
+    // O painel que o aplicativo abre ao tocar no marcador mostra o endereço, e
+    // os marcadores vêm daqui. Sem estes campos no tile, cada toque custaria
+    // uma segunda requisição para buscar pelo nome o lugar que ele já tem.
+    test("With the full address of a place", async () => {
+      await createPlace({
+        sourceId: "com-endereco",
+        name: "Saracura Gastrobar",
+        category: "bar",
+        latitude: -23.5505,
+        longitude: -46.6333,
+        street: "Rua Treze de Maio, 739",
+        neighborhood: "Bela Vista",
+        locality: "São Paulo",
+        region: "SP",
+        postcode: "01327-000",
+      });
+
+      const response = await fetch(
+        `${webserver.origin}/api/v1/places/${TILE_DA_SE}`,
+      );
+      expect(response.status).toBe(200);
+
+      const responseBody = await response.json();
+      const lugar = responseBody.places.find(
+        (place) => place.name === "Saracura Gastrobar",
+      );
+
+      expect(lugar).toEqual({
+        name: "Saracura Gastrobar",
+        category: "bar",
+        latitude: -23.5505,
+        longitude: -46.6333,
+        street: "Rua Treze de Maio, 739",
+        neighborhood: "Bela Vista",
+        locality: "São Paulo",
+        region: "SP",
+        postcode: "01327-000",
+      });
     });
 
     // O mapa não pode depender de quem está olhando: uma sessão vencida não
@@ -97,14 +145,40 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
   });
 });
 
-async function createPlace({ sourceId, name, category, latitude, longitude }) {
+async function createPlace({
+  sourceId,
+  name,
+  category,
+  latitude,
+  longitude,
+  street = null,
+  neighborhood = null,
+  locality = null,
+  region = null,
+  postcode = null,
+}) {
   await database.query({
     text: `
       INSERT INTO
-        places (source, source_id, name, category, latitude, longitude)
+        places (
+          source, source_id, name, category, latitude, longitude,
+          street, neighborhood, locality, region, postcode
+        )
       VALUES
-        ($1, $2, $3, $4, $5, $6)
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     ;`,
-    values: ["overture", sourceId, name, category, latitude, longitude],
+    values: [
+      "overture",
+      sourceId,
+      name,
+      category,
+      latitude,
+      longitude,
+      street,
+      neighborhood,
+      locality,
+      region,
+      postcode,
+    ],
   });
 }
