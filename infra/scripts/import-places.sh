@@ -83,6 +83,11 @@ INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-we
 -- caixa, filtrar por country obriga a varrer os polígonos do mundo todo — mais
 -- de um gigabyte descendo do S3 para achar os bairros do Brasil.
 --
+-- E é INTERSEÇÃO, não "o canto dentro da caixa". Comparar só `xmin`/`ymin`
+-- descarta todo polígono cujo canto sudoeste caia fora — medido numa carga da
+-- região da Sé: a cobertura de bairro caiu de 100% para 37,7%, porque os
+-- bairros vizinhos que entram na área têm o canto do lado de fora dela.
+--
 -- Os três subtipos juntos porque o Overture não usa um só. Em São Paulo o que
 -- existe é o "macrohood" ("Morumbi"); em outras cidades, o "neighborhood".
 -- O desempate está na consulta abaixo, do mais específico para o mais geral.
@@ -99,8 +104,10 @@ FROM read_parquet(
   's3://overturemaps-us-west-2/release/$RELEASE/theme=divisions/type=division_area/*',
   hive_partitioning = 1
 )
-WHERE bbox.xmin BETWEEN $OESTE AND $LESTE
-  AND bbox.ymin BETWEEN $SUL AND $NORTE
+WHERE bbox.xmin <= $LESTE
+  AND bbox.xmax >= $OESTE
+  AND bbox.ymin <= $NORTE
+  AND bbox.ymax >= $SUL
   AND country = '$PAIS'
   AND subtype IN ('microhood', 'neighborhood', 'macrohood')
   AND names.primary IS NOT NULL;
@@ -122,6 +129,8 @@ COPY (
       ORDER BY b.especificidade
       LIMIT 1
     ) AS neighborhood,
+    p.street,
+    p.postcode,
     p.locality,
     p.region
   FROM (
@@ -131,6 +140,8 @@ COPY (
     categories.primary AS category,
     bbox.ymin AS latitude,
     bbox.xmin AS longitude,
+    addresses[1].freeform AS street,
+    addresses[1].postcode AS postcode,
     addresses[1].locality AS locality,
     addresses[1].region AS region
   FROM read_parquet(

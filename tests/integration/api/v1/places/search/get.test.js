@@ -19,9 +19,11 @@ const LUGARES = [
     category: "bar",
     latitude: -23.5548,
     longitude: -46.6448,
+    street: "Rua Treze de Maio, 739",
     neighborhood: "Bela Vista",
     locality: "São Paulo",
     region: "SP",
+    postcode: "01327-000",
   },
   {
     sourceId: "se-2",
@@ -100,9 +102,11 @@ describe("GET /api/v1/places", () => {
           category: "bar",
           latitude: -23.5548,
           longitude: -46.6448,
+          street: "Rua Treze de Maio, 739",
           neighborhood: "Bela Vista",
           locality: "São Paulo",
           region: "SP",
+          postcode: "01327-000",
         },
       ]);
     });
@@ -216,10 +220,10 @@ async function seedPlaces() {
         INSERT INTO
           places (
             source, source_id, name, category, latitude, longitude,
-            neighborhood, locality, region
+            neighborhood, street, postcode, locality, region
           )
         VALUES
-          ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       ;`,
       values: [
         "overture",
@@ -229,6 +233,8 @@ async function seedPlaces() {
         lugar.latitude,
         lugar.longitude,
         lugar.neighborhood,
+        lugar.street ?? null,
+        lugar.postcode ?? null,
         lugar.locality,
         lugar.region,
       ],
