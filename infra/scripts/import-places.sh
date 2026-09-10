@@ -48,6 +48,26 @@ if ! command -v duckdb &>/dev/null; then
     exit 1
 fi
 
+# Crase dentro do heredoc SQL vira execução de comando, porque o heredoc não é
+# citado (ver o comentário logo acima do `duckdb <<SQL`). Lá já existe o aviso
+# escrito, e ele foi violado duas vezes — então aqui está o mesmo aviso como
+# verificação: um `xmin` entre crases num comentário SQL imprimia
+# "xmin: command not found" e desaparecia da consulta.
+#
+# Roda ANTES do S3 de propósito: o erro aparece na hora, não depois de minutos
+# baixando parquet. E lê o PRÓPRIO arquivo, que é o único jeito de vigiar um
+# heredoc embutido.
+if awk '/^SQL$/ { dentro = 0 }
+        dentro && /`/ { achou = 1 }
+        /^duckdb <<SQL$/ { dentro = 1 }
+        END { exit !achou }' "${BASH_SOURCE[0]}"; then
+    echo "erro: crase dentro do heredoc SQL — use aspas nos comentários" >&2
+    awk '/^SQL$/ { dentro = 0 }
+         dentro && /`/ { printf "  linha %d: %s\n", NR, $0 }
+         /^duckdb <<SQL$/ { dentro = 1 }' "${BASH_SOURCE[0]}" >&2
+    exit 1
+fi
+
 CSV="$(mktemp -t places).csv"
 trap 'rm -f "$CSV"' EXIT
 
@@ -83,7 +103,7 @@ INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-we
 -- caixa, filtrar por country obriga a varrer os polígonos do mundo todo — mais
 -- de um gigabyte descendo do S3 para achar os bairros do Brasil.
 --
--- E é INTERSEÇÃO, não "o canto dentro da caixa". Comparar só `xmin`/`ymin`
+-- E é INTERSEÇÃO, não "o canto dentro da caixa". Comparar só "xmin"/"ymin"
 -- descarta todo polígono cujo canto sudoeste caia fora — medido numa carga da
 -- região da Sé: a cobertura de bairro caiu de 100% para 37,7%, porque os
 -- bairros vizinhos que entram na área têm o canto do lado de fora dela.
