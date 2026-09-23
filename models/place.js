@@ -14,6 +14,12 @@ const MAX_ZOOM = 18;
 // Teto por tile. Num tile de zoom 14 no centro de São Paulo cabem centenas de
 // estabelecimentos; o aplicativo desenha algumas dezenas, e trazer o resto
 // gastaria banda de rede para nada.
+//
+// O teto MORDE: medido no release 2026-08-19.0 do Overture, o tile de z14 da
+// Liberdade tem 1709 lugares e o de z15, 366. Por isso o aplicativo pede em
+// z16, onde o tile mais cheio da cidade de São Paulo tem 272. Quando o teto
+// morder mesmo assim, quem fica de fora é decidido pela ordem em
+// `findWithinTile`.
 const MAX_PLACES_PER_TILE = 300;
 
 function parseCoordinates(rawCoordinates) {
@@ -174,6 +180,13 @@ function escapeLike(term) {
 //
 // Custa cerca de sessenta bytes por lugar: uns dez quilobytes num tile cheio,
 // que a borda guarda por trinta dias junto do resto da resposta.
+//
+// A ordem é pelo `id`, e não pelo nome, porque é ela que decide quem cai
+// quando o tile passa de `MAX_PLACES_PER_TILE`. Em ordem alfabética o corte
+// apagava um pedaço do ALFABETO: na Liberdade, em z15, tudo depois de
+// "SnowFall Brasil" sumia do mapa — Udon Jinbei, Thai Chef, Sushi Kenzo. O id
+// é um UUID aleatório, então o corte vira uma amostra espalhada pelo tile
+// inteiro, a mesma a cada pedido, e sai do índice da chave primária.
 async function findWithinTile(coordinates) {
   const { west, east, south, north } = tile.bounds(coordinates);
 
@@ -195,7 +208,7 @@ async function findWithinTile(coordinates) {
         latitude BETWEEN $1 AND $2
         AND longitude BETWEEN $3 AND $4
       ORDER BY
-        name
+        id
       LIMIT
         $5
     ;`,
