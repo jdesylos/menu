@@ -31,6 +31,19 @@ set -euo pipefail
 # linha que fica registrada no histórico.
 RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
 
+# O release do Foursquare OS Places, fixo pelo mesmo motivo.
+#
+# É a segunda fonte, e entra só para uma coisa: dizer quem FECHOU. O Overture
+# não sabe — o "operating_status" dele veio vazio em 100% dos lugares de comer
+# de São Paulo no release acima, e 93% dos registros vêm de páginas do
+# Facebook, que continuam no ar anos depois de o restaurante fechar. O
+# Foursquare publica "date_closed" por lugar, sob Apache 2.0.
+#
+# Ele fica no Hugging Face, com acesso liberado mediante aceite dos termos, e a
+# leitura exige um token de leitura de quem roda a carga: HF_TOKEN. Sem ele a
+# carga segue só com o Overture, como era antes, e avisa.
+FSQ_RELEASE="${FSQ_RELEASE:-2026-09-15}"
+
 # A caixa de `models/tile.js` — Brasil com folga. Ela sozinha pega 1,5 milhão de
 # lugares de Argentina, Chile, Colômbia e vizinhos, então o país entra como
 # filtro de verdade logo abaixo; a caixa fica porque é ela que deixa o DuckDB
@@ -57,21 +70,136 @@ fi
 # Roda ANTES do S3 de propósito: o erro aparece na hora, não depois de minutos
 # baixando parquet. E lê o PRÓPRIO arquivo, que é o único jeito de vigiar um
 # heredoc embutido.
-if awk '/^SQL$/ { dentro = 0 }
+#
+# Vigia também o SQL do Foursquare, que mora numa string entre aspas duplas
+# (FECHADOS_SQL) antes de ser colado no heredoc: ali a crase executa do mesmo
+# jeito, e um pouco antes.
+if awk '/^SQL$/ || /^"$/ { dentro = 0 }
         dentro && /`/ { achou = 1 }
-        /^duckdb <<SQL$/ { dentro = 1 }
+        /^duckdb <<SQL$/ || /^    FECHADOS_SQL="$/ { dentro = 1 }
         END { exit !achou }' "${BASH_SOURCE[0]}"; then
-    echo "erro: crase dentro do heredoc SQL — use aspas nos comentários" >&2
-    awk '/^SQL$/ { dentro = 0 }
+    echo "erro: crase dentro do SQL — use aspas nos comentários" >&2
+    awk '/^SQL$/ || /^"$/ { dentro = 0 }
          dentro && /`/ { printf "  linha %d: %s\n", NR, $0 }
-         /^duckdb <<SQL$/ { dentro = 1 }' "${BASH_SOURCE[0]}" >&2
+         /^duckdb <<SQL$/ || /^    FECHADOS_SQL="$/ { dentro = 1 }' "${BASH_SOURCE[0]}" >&2
     exit 1
 fi
 
 CSV="$(mktemp -t places).csv"
-trap 'rm -f "$CSV"' EXIT
+FECHADOS="$(mktemp -t fechados).csv"
+trap 'rm -f "$CSV" "$FECHADOS"' EXIT
 
-echo "[1/2] Extraindo do Overture (release $RELEASE)..."
+# Quem fechou, segundo o Foursquare — ou ninguém, sem o token.
+#
+# A regra, e por que ela é assim:
+#
+# - Um lugar do Overture é o MESMO do Foursquare quando os dois estão a menos de
+#   120 m e o nome normalizado (minúsculo, sem acento, só letras e números) é
+#   igual, ou um contém o outro. As duas fontes escrevem o mesmo lugar de jeitos
+#   diferentes: "Old Dog Dogueria" e "Old Dog", "Mezzo Steakhouse e Café" e
+#   "Mezzo Steakhouse".
+# - Ele SAI só quando algum par é fechado e NENHUM par é aberto. Na dúvida, o
+#   lugar fica: esconder um restaurante que existe é pior do que mostrar um que
+#   fechou.
+# - O par fechado precisa ser forte: nome igual, ou nome contido com pelo menos
+#   seis letras no menor, e o menor não pode ser uma palavra genérica. Medido no
+#   Brasil inteiro: sem essa trava, "Restaurante a Quilo ... Salsalito" casava
+#   com um lugar chamado só "Almoço". Casamento aproximado (Jaro-Winkler) foi
+#   descartado: juntou "Restaurante Porque Sim" com "Restaurante Fuji".
+#
+# Medido nos releases fixados acima: 605.021 lugares de comer no Brasil, 32%
+# com par no Foursquare, 10.490 fechados (1,7%). A nota de confiança do
+# Overture de quem sai tem média 0,46, contra 0,66 do resto. Na Liberdade, os
+# cinco que a regra tira foram conferidos em fontes independentes: nenhum
+# estava aberto com aquele nome e endereço.
+#
+# O limite: 68% dos lugares não têm par no Foursquare, e sobre eles esta regra
+# não diz nada.
+if [ -n "${HF_TOKEN:-}" ]; then
+    FECHADOS_SQL="
+CREATE SECRET hf (TYPE huggingface, TOKEN '$HF_TOKEN');
+
+CREATE TEMP TABLE fsq AS
+SELECT
+  name,
+  latitude,
+  longitude,
+  date_closed IS NOT NULL AS fechado
+FROM read_parquet(
+  'hf://datasets/foursquare/fsq-os-places/release/dt=$FSQ_RELEASE/places/parquet/*.parquet'
+)
+WHERE bbox.xmin BETWEEN $OESTE AND $LESTE
+  AND bbox.ymin BETWEEN $SUL AND $NORTE
+  AND country = '$PAIS'
+  AND name IS NOT NULL
+  AND list_has_any(
+    list_transform(fsq_category_labels, lambda c: split_part(c, ' > ', 1)),
+    ['Dining and Drinking']
+  );
+
+CREATE MACRO normalizado(s) AS regexp_replace(lower(strip_accents(s)), '[^a-z0-9]', '', 'g');
+
+-- Palavras que, sozinhas, não identificam lugar nenhum.
+CREATE TEMP TABLE genericos AS SELECT unnest([
+  'almoco','restaurante','restaurant','lanchonete','lanches','pizzaria','pizza',
+  'padaria','churrascaria','pastelaria','pastel','sorveteria','cafeteria',
+  'confeitaria','doceria','hamburgueria','burger','sushi','temakeria','espetinho',
+  'cervejaria','choperia','petiscaria','boteco','botequim','quiosque','delivery',
+  'marmitex','marmitaria','selfservice','rodizio','comida','cantina','bistro',
+  'acai','bomboniere','refeicoes','coffee','food','foodtruck'
+]) AS palavra;
+
+-- A vizinhança por grade: cada lugar do Foursquare entra nas nove células de
+-- 0,002 grau em volta da sua, e o par se procura por igualdade de célula. É o
+-- que deixa o país inteiro cruzar em segundos em vez de comparar tudo com tudo.
+CREATE TEMP TABLE pares AS
+WITH o AS (
+  SELECT
+    source_id, latitude, longitude, normalizado(name) AS n,
+    floor(latitude / 0.002)::BIGINT AS cy, floor(longitude / 0.002)::BIGINT AS cx
+  FROM lugares
+),
+f AS (
+  SELECT
+    latitude, longitude, fechado, normalizado(name) AS n,
+    floor(latitude / 0.002)::BIGINT + dy AS cy, floor(longitude / 0.002)::BIGINT + dx AS cx
+  FROM fsq, (SELECT unnest([-1, 0, 1]) AS dy), (SELECT unnest([-1, 0, 1]) AS dx)
+)
+SELECT
+  o.source_id,
+  f.fechado,
+  o.n = f.n
+    OR (
+      least(length(o.n), length(f.n)) >= 6
+      AND (CASE WHEN length(o.n) < length(f.n) THEN o.n ELSE f.n END)
+        NOT IN (SELECT palavra FROM genericos)
+    ) AS forte
+FROM o JOIN f ON o.cy = f.cy AND o.cx = f.cx
+WHERE length(o.n) > 0 AND length(f.n) > 0
+  AND 6371000 * 2 * asin(sqrt(
+        pow(sin(radians(f.latitude - o.latitude) / 2), 2)
+        + cos(radians(o.latitude)) * cos(radians(f.latitude))
+          * pow(sin(radians(f.longitude - o.longitude) / 2), 2)
+      )) < 120
+  AND (
+    o.n = f.n
+    OR (contains(o.n, f.n) AND length(f.n) >= 4)
+    OR (contains(f.n, o.n) AND length(o.n) >= 4)
+  );
+
+CREATE TEMP TABLE fechados AS
+SELECT source_id
+FROM pares
+GROUP BY source_id
+HAVING bool_or(fechado AND forte) AND NOT bool_or(NOT fechado);
+"
+else
+    echo "aviso: sem HF_TOKEN — a carga segue só com o Overture, e quem fechou" >&2
+    echo "       continua no mapa. Ver o comentário de FSQ_RELEASE neste script." >&2
+    FECHADOS_SQL="CREATE TEMP TABLE fechados (source_id VARCHAR);"
+fi
+
+echo "[1/2] Extraindo do Overture (release $RELEASE) e do Foursquare (release $FSQ_RELEASE)..."
 
 # As categorias que contam como "onde se come".
 #
@@ -132,7 +260,7 @@ WHERE bbox.xmin <= $LESTE
   AND subtype IN ('microhood', 'neighborhood', 'macrohood')
   AND names.primary IS NOT NULL;
 
-COPY (
+CREATE TEMP TABLE lugares AS
   SELECT
     p.source_id,
     p.name,
@@ -183,15 +311,26 @@ COPY (
         'bistro','hotel_bar','cafeteria','pie_shop','whiskey_bar','beach_bar'
       )
     )
-  ) p
+  ) p;
+
+$FECHADOS_SQL
+
+-- O que fechou não entra, e sai do banco se já estava lá: o upsert sozinho só
+-- acrescenta e atualiza, e um lugar ausente do CSV ficaria na tabela para
+-- sempre.
+COPY (
+  SELECT * FROM lugares WHERE source_id NOT IN (SELECT source_id FROM fechados)
 ) TO '$CSV' (FORMAT CSV, HEADER);
+
+COPY (SELECT source_id FROM fechados) TO '$FECHADOS' (FORMAT CSV, HEADER);
 SQL
 
 echo "      $(($(wc -l < "$CSV") - 1)) estabelecimentos, $(du -h "$CSV" | cut -f1)"
+echo "      $(($(wc -l < "$FECHADOS") - 1)) fechados, segundo o Foursquare"
 echo "[2/2] Carregando no banco..."
 
 # `--env-file-if-exists` para a carga local achar o Postgres do `compose.yaml`
 # sem ninguém exportar nada. Em produção não atrapalha: variável já definida no
 # ambiente vence o arquivo.
 node --env-file-if-exists="$RAIZ/.env.development" \
-    "$RAIZ/infra/scripts/import-places.mjs" "$CSV"
+    "$RAIZ/infra/scripts/import-places.mjs" "$CSV" "$FECHADOS"

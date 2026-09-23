@@ -12,7 +12,7 @@
 //
 // # Uso
 //
-//   node infra/scripts/import-places.mjs <arquivo.csv>
+//   node infra/scripts/import-places.mjs <arquivo.csv> [fechados.csv]
 //
 // Normalmente quem chama é o `import-places.sh`, que extrai e carrega numa
 // tacada. As credenciais saem das mesmas variáveis de ambiente da aplicação.
@@ -22,6 +22,13 @@
 // O `ON CONFLICT` usa (source, source_id): rodar o import do release seguinte
 // ATUALIZA o que mudou em vez de duplicar. Um lugar que sai do Overture
 // permanece no banco até alguém removê-lo — some do dado, não da tabela.
+//
+// # O que ele apaga
+//
+// Só os ids do segundo arquivo: os lugares que o Foursquare dá como fechados —
+// ver `import-places.sh`. Uma lista explícita, e não "tudo o que não veio no
+// CSV": uma carga de teste com uma caixa estreita (`OESTE=... npm run
+// places:import`) apagaria o resto do país.
 //
 // `.mjs` e não `.js`: o `package.json` não declara `type: module`, e um script
 // com `import` num `.js` faz o Node reprocessar o arquivo e avisar.
@@ -34,6 +41,10 @@ import database from "../database.js";
 // parâmetros do Postgres com folga, e ainda assim fazem o país inteiro entrar
 // em poucos minutos.
 const BATCH_SIZE = 500;
+
+// Quantos ids por DELETE. Vão num único parâmetro de array, então o limite de
+// parâmetros não pesa; o teto só evita uma consulta de megabytes.
+const DELETE_BATCH_SIZE = 1000;
 
 const SOURCE = "overture";
 
@@ -57,7 +68,9 @@ async function main() {
   const filePath = process.argv[2];
 
   if (!filePath) {
-    console.error("uso: node infra/scripts/import-places.mjs <arquivo.csv>");
+    console.error(
+      "uso: node infra/scripts/import-places.mjs <arquivo.csv> [fechados.csv]",
+    );
     process.exit(1);
   }
 
@@ -102,11 +115,76 @@ async function main() {
       await upsert(client, batch);
       imported += batch.length;
     }
+
+    console.log(`\r      ${imported} carregados, ${skipped} ignorados`);
+
+    const closedPath = process.argv[3];
+    if (closedPath) {
+      const removed = await removeClosed(client, closedPath);
+      console.log(`      ${removed} fechados removidos do banco`);
+    }
   } finally {
     await client.end();
   }
+}
 
-  console.log(`\r      ${imported} carregados, ${skipped} ignorados`);
+// Apaga os lugares fechados, em lotes.
+//
+// Conta o que de fato saiu, e não o tamanho da lista: na primeira carga com o
+// Foursquare saem os que já estavam no banco, nas seguintes quase nada — e é
+// essa diferença que diz se a regra está tirando demais.
+async function removeClosed(client, filePath) {
+  const stream = readline.createInterface({
+    input: fs.createReadStream(filePath),
+    crlfDelay: Infinity,
+  });
+
+  let header = null;
+  let batch = [];
+  let removed = 0;
+
+  for await (const line of stream) {
+    if (!line.trim()) continue;
+
+    if (header === null) {
+      header = parseLine(line);
+      if (header.length !== 1 || header[0] !== "source_id") {
+        console.error(
+          `erro: cabeçalho inesperado em ${filePath}: ${header.join(",")}`,
+        );
+        process.exit(1);
+      }
+      continue;
+    }
+
+    batch.push(parseLine(line)[0]);
+
+    if (batch.length >= DELETE_BATCH_SIZE) {
+      removed += await deleteBatch(client, batch);
+      batch = [];
+    }
+  }
+
+  if (batch.length > 0) {
+    removed += await deleteBatch(client, batch);
+  }
+
+  return removed;
+}
+
+async function deleteBatch(client, sourceIds) {
+  const result = await client.query({
+    text: `
+      DELETE FROM
+        places
+      WHERE
+        source = $1
+        AND source_id = ANY($2::text[])
+    ;`,
+    values: [SOURCE, sourceIds],
+  });
+
+  return result.rowCount;
 }
 
 function assertHeader(header) {
