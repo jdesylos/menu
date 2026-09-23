@@ -133,40 +133,38 @@ async function main() {
 // Conta o que de fato saiu, e não o tamanho da lista: na primeira carga com o
 // Foursquare saem os que já estavam no banco, nas seguintes quase nada — e é
 // essa diferença que diz se a regra está tirando demais.
+//
+// O arquivo é lido INTEIRO, e não linha a linha com `readline` como o CSV
+// principal. A primeira versão iterava com `for await` e esperava o DELETE
+// dentro do laço, e em produção morreu com `ERR_USE_AFTER_CLOSE`: o iterador
+// do `readline` guarda até 1024 linhas e PAUSA a leitura quando o consumidor
+// atrasa; se o arquivo acaba durante a pausa, a interface fecha, e o `resume()`
+// seguinte lança. Com a Neon cada DELETE custa uma ida e volta de rede e a
+// pausa acontece; com o Postgres local ele volta em microssegundos e o teste
+// passou. São ~10 mil ids, uns 350 KB: ler tudo de uma vez não custa nada e
+// tira o problema do caminho.
 async function removeClosed(client, filePath) {
-  const stream = readline.createInterface({
-    input: fs.createReadStream(filePath),
-    crlfDelay: Infinity,
-  });
+  const lines = fs
+    .readFileSync(filePath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
 
-  let header = null;
-  let batch = [];
-  let removed = 0;
-
-  for await (const line of stream) {
-    if (!line.trim()) continue;
-
-    if (header === null) {
-      header = parseLine(line);
-      if (header.length !== 1 || header[0] !== "source_id") {
-        console.error(
-          `erro: cabeçalho inesperado em ${filePath}: ${header.join(",")}`,
-        );
-        process.exit(1);
-      }
-      continue;
-    }
-
-    batch.push(parseLine(line)[0]);
-
-    if (batch.length >= DELETE_BATCH_SIZE) {
-      removed += await deleteBatch(client, batch);
-      batch = [];
-    }
+  const header = parseLine(lines[0] ?? "");
+  if (header.length !== 1 || header[0] !== "source_id") {
+    console.error(
+      `erro: cabeçalho inesperado em ${filePath}: ${header.join(",")}`,
+    );
+    process.exit(1);
   }
 
-  if (batch.length > 0) {
-    removed += await deleteBatch(client, batch);
+  const sourceIds = lines.slice(1).map((line) => parseLine(line)[0]);
+  let removed = 0;
+
+  for (let i = 0; i < sourceIds.length; i += DELETE_BATCH_SIZE) {
+    removed += await deleteBatch(
+      client,
+      sourceIds.slice(i, i + DELETE_BATCH_SIZE),
+    );
   }
 
   return removed;
