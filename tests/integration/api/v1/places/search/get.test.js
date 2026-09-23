@@ -125,7 +125,7 @@ describe("GET /api/v1/places", () => {
       ]);
     });
 
-    test("With accents and case ignored", async () => {
+    test("With case ignored", async () => {
       const response = await fetch(
         `${webserver.origin}/api/v1/places?q=MADONNA`,
       );
@@ -135,6 +135,45 @@ describe("GET /api/v1/places", () => {
       expect(responseBody.places.map((place) => place.name)).toEqual([
         "Bar da Madonna",
       ]);
+    });
+
+    // O teclado do Android não entrega acento ao aplicativo: quem digita
+    // "leo calcada" precisa achar o "Léo Calçada".
+    test("With accents in the name and none in the term", async () => {
+      const response = await fetch(
+        `${webserver.origin}/api/v1/places?q=leo%20calcada`,
+      );
+      expect(response.status).toBe(200);
+
+      const responseBody = await response.json();
+      expect(responseBody.places.map((place) => place.name)).toEqual([
+        "Bar do Léo Calçada da Fama",
+      ]);
+    });
+
+    // E o contrário: acento a mais no que foi digitado não esconde o lugar
+    // que o dado escreveu sem acento.
+    test("With accents in the term and none in the name", async () => {
+      const response = await fetch(
+        `${webserver.origin}/api/v1/places?q=${encodeURIComponent("Pôrto")}`,
+      );
+      expect(response.status).toBe(200);
+
+      const responseBody = await response.json();
+      expect(responseBody.places.map((place) => place.name)).toEqual([
+        "Bar do Porto",
+      ]);
+    });
+
+    // O começo do nome continua valendo mais, com ou sem acento.
+    test("With accents ignored when ranking names that start with the term", async () => {
+      const response = await fetch(
+        `${webserver.origin}/api/v1/places?q=${encodeURIComponent("bár do lé")}`,
+      );
+      expect(response.status).toBe(200);
+
+      const responseBody = await response.json();
+      expect(responseBody.places[0].name).toBe("Bar do Léo Calçada da Fama");
     });
 
     // O que começa com o termo vem antes do que só o contém: é o casamento mais
