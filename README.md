@@ -137,6 +137,13 @@ O dado é do [Overture Maps](https://overturemaps.org/) sob **CDLA-Permissive 2.
 licença permissiva, uso comercial liberado e **sem obrigação de atribuição na tela**,
 diferente do ODbL do basemap.
 
+O Overture não sabe quem **fechou**: o status de funcionamento dele vem vazio, e 93% dos
+lugares de São Paulo vêm de páginas do Facebook, que ficam no ar anos depois de o
+restaurante fechar. Quem diz isso é o [Foursquare OS Places](https://opensource.foursquare.com/os-places/)
+(Apache 2.0), cruzado na carga: o lugar que ele dá como fechado **sai do banco**. Do
+Foursquare não se guarda nada — ele só decide quem sai. No Brasil, nos releases fixados,
+isso tira 10.490 de 605.021 lugares (1,7%); a regra está comentada no script.
+
 O que conta como "lugar de comer" é uma **lista explícita** de categorias na consulta de
 `infra/scripts/import-places.sh`, mais o sufixo `_restaurant`. A taxonomia do Overture tem
 1508 categorias só no Brasil, e casar por pedaço de nome não funciona: procurar `bar`
@@ -229,10 +236,17 @@ brew install duckdb
 
 POSTGRES_HOST=... POSTGRES_PORT=5432 POSTGRES_USER=... \
 POSTGRES_PASSWORD=... POSTGRES_DB=... NODE_ENV=production \
-  npm run places:import
+HF_TOKEN=... npm run places:import
 ```
 
 `NODE_ENV=production` liga o SSL exigido pela Neon.
+
+`HF_TOKEN` é um token de **leitura** do Hugging Face, onde o Foursquare publica o dado:
+crie a conta, aceite os termos em
+[foursquare/fsq-os-places](https://huggingface.co/datasets/foursquare/fsq-os-places) e gere
+o token em Settings → Access Tokens. Ele só é usado na hora da carga, por quem a roda — não
+vai para a Vercel nem para o repositório. Sem ele a carga segue só com o Overture e avisa:
+quem fechou continua no mapa.
 
 O DuckDB lê o GeoParquet do Overture direto no S3 e **filtra lá**, trazendo só as cinco
 colunas que interessam e só as linhas de comida do Brasil: cerca de **100 MB e dois
@@ -250,10 +264,12 @@ OESTE=-47 SUL=-24 LESTE=-46 NORTE=-23 npm run places:import
 ```
 
 O import faz **upsert** por `(source, source_id)` — rodar de novo no release seguinte do
-Overture atualiza o que mudou, sem duplicar. Um lugar que sai do dado permanece na tabela
-até ser removido à mão.
+Overture atualiza o que mudou, sem duplicar. O que ele apaga é só a lista de fechados do
+Foursquare, por id; um lugar que simplesmente sai do Overture permanece na tabela até ser
+removido à mão. Apagar "tudo o que não veio" seria mais simples, e uma carga de teste com
+a caixa estreitada acima apagaria o resto do país.
 
-O release do Overture é fixado no script (`OVERTURE_RELEASE`), para que duas cargas feitas
+Os releases são fixados no script (`OVERTURE_RELEASE`, `FSQ_RELEASE`), para que duas cargas feitas
 em semanas diferentes carreguem o mesmo dado. Eles publicam um release por mês;
 recarregar a cada poucos meses basta.
 
