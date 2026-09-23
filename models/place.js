@@ -109,6 +109,12 @@ function parseOrigin(query) {
 // termo aparece antes — é o casamento mais provável —, e o desempate é a
 // distância a quem procura.
 //
+// Acento não conta, nos dois lados: "cafe" acha "Café" e "café" acha "Cafe".
+// O teclado do Android não entrega acento ao aplicativo, e sem isto nenhum
+// lugar com acento no nome era achado por lá. A comparação passa pela mesma
+// "sem_acento" do índice — ver a migration "busca-sem-acento-em-places" —, e é
+// isso que mantém a busca no índice em vez de varrer a tabela.
+//
 // A ordenação por distância usa graus, não metros: comparar quadrados de
 // diferença basta para ordenar, e o cosseno da latitude corrige o encolhimento
 // da longitude longe do equador. Uma raiz quadrada aqui só custaria tempo para
@@ -129,7 +135,7 @@ async function search({ term, latitude, longitude }) {
   // Sem origem o pedaço do meio some da lista em vez de virar uma constante:
   // `ORDER BY 0` no Postgres é a POSIÇÃO da coluna zero, não o número zero, e
   // a consulta inteira falha.
-  const ordering = [`(name ILIKE $2 ESCAPE '\\') DESC`];
+  const ordering = [`(sem_acento(name) ILIKE sem_acento($2) ESCAPE '\\') DESC`];
   if (hasOrigin) {
     ordering.push(`(latitude - $3) * (latitude - $3)
         + (longitude - $4) * (longitude - $4)
@@ -152,7 +158,7 @@ async function search({ term, latitude, longitude }) {
       FROM
         places
       WHERE
-        name ILIKE $1 ESCAPE '\\'
+        sem_acento(name) ILIKE sem_acento($1) ESCAPE '\\'
       ORDER BY
         ${ordering.join(",\n        ")}
       LIMIT
