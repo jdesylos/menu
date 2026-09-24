@@ -29,7 +29,11 @@ set -euo pipefail
 # O release do Overture. Fixo, e não "o mais novo": assim duas cargas feitas em
 # semanas diferentes carregam o MESMO dado, e atualizar é uma mudança de uma
 # linha que fica registrada no histórico.
-RELEASE="${OVERTURE_RELEASE:-2026-08-19.0}"
+#
+# Nem sempre é uma linha só: o 2026-09-23.0 trocou a coluna de categoria, e a
+# consulta abaixo mudou junto. Um release anterior a ele não roda mais com este
+# script — ver o comentário das categorias.
+RELEASE="${OVERTURE_RELEASE:-2026-09-23.0}"
 
 # O release do Foursquare OS Places, fixo pelo mesmo motivo.
 #
@@ -201,17 +205,34 @@ fi
 
 echo "[1/2] Extraindo do Overture (release $RELEASE) e do Foursquare (release $FSQ_RELEASE)..."
 
-# As categorias que contam como "onde se come".
+# O que conta como "onde se come": a raiz `food_and_drink` da taxonomia do
+# Overture, menos três ramos.
 #
-# Lista EXPLÍCITA, e não casamento por pedaço de nome. A taxonomia do Overture
-# tem 1508 categorias no Brasil, e procurar "bar" dentro do nome traz `barber`
-# (70 mil barbearias); procurar "pub" traz `public_school` e `notary_public`.
-# O sufixo `_restaurant` é a única regra por padrão, e é segura: as 118
-# categorias que terminam assim são todas cozinha.
+# Até o release 2026-08-19.0 o Overture publicava `categories`, uma lista plana
+# de 1508 categorias no Brasil, e a regra era uma lista EXPLÍCITA delas —
+# procurar "bar" dentro do nome trazia `barber`, 70 mil barbearias. O
+# 2026-09-23.0 trocou essa coluna por `taxonomy`, uma árvore, e a lista virou a
+# raiz dela.
 #
-# Ficam DE FORA de propósito: `health_food_store` e `specialty_foods` (são
-# loja), `food_delivery_service` (não tem salão para visitar) e
+# Medido na cidade de São Paulo, cruzando os dois releases pelo id: dos lugares
+# que a lista antiga trazia, 98,5% estão sob `food_and_drink`. O resto saiu
+# porque o Overture o reclassificou pelo que é — o `food` genérico virou
+# mercearia, parte dos bufês virou serviço de festa. As exclusões que a lista
+# antiga fazia de propósito caíram fora da raiz sozinhas, mais de 95% de cada
+# uma: `health_food_store` e `specialty_foods` (são loja),
+# `food_delivery_service` (não tem salão para visitar) e
 # `food_beverage_service_distribution` (é atacado).
+#
+# Os três ramos cortados:
+#
+# - `candy_store`, com `chocolatier` embaixo: doceria e chocolateria são loja,
+#   e o ícone do mapa é garfo e faca. Na lista antiga também ficavam de fora;
+# - `internet_cafe`: é lan house;
+# - `airport_lounge`: é sala VIP de companhia aérea.
+#
+# O que a árvore traz a mais, e fica: narguilé, lounge, adega, cervejaria ao ar
+# livre, sanduicheria, gelateria, panquecaria, kebab. São lugares onde se come
+# ou se bebe que a lista antiga não nomeava — não exclusões pensadas.
 # O heredoc NÃO é citado de propósito — $RELEASE, $PAIS e a caixa do país
 # precisam ser substituídos pelo shell antes de o DuckDB ver a consulta. O preço
 # é que crase aqui dentro vira execução de comando: os comentários SQL abaixo
@@ -285,7 +306,7 @@ CREATE TEMP TABLE lugares AS
   SELECT
     id AS source_id,
     names.primary AS name,
-    categories.primary AS category,
+    taxonomy.primary AS category,
     bbox.ymin AS latitude,
     bbox.xmin AS longitude,
     addresses[1].freeform AS street,
@@ -300,16 +321,9 @@ CREATE TEMP TABLE lugares AS
     AND bbox.ymin BETWEEN $SUL AND $NORTE
     AND addresses[1].country = '$PAIS'
     AND names.primary IS NOT NULL
-    AND (
-      categories.primary LIKE '%\_restaurant' ESCAPE '\'
-      OR categories.primary IN (
-        'restaurant','bar','bakery','cafe','coffee_shop','ice_cream_shop','desserts',
-        'smoothie_juice_bar','eat_and_drink','steakhouse','diner','pub','brewery','food',
-        'beer_bar','food_truck','cocktail_bar','gastropub','delicatessen','tea_room',
-        'milk_bar','tapas_bar','wine_bar','sports_bar','salad_bar','donuts','dive_bar',
-        'gay_bar','bubble_tea','food_court','patisserie_cake_shop','bagel_shop','irish_pub',
-        'bistro','hotel_bar','cafeteria','pie_shop','whiskey_bar','beach_bar'
-      )
+    AND taxonomy.hierarchy[1] = 'food_and_drink'
+    AND NOT list_has_any(
+      taxonomy.hierarchy, ['candy_store', 'internet_cafe', 'airport_lounge']
     )
   ) p;
 
