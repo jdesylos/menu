@@ -140,3 +140,26 @@ export class MethodNotAllowedError extends Error {
     };
   }
 }
+
+export class RateLimitError extends Error {
+  constructor({ cause, message, action, retryAfter }) {
+    super(message || "Muitas requisições.", {
+      cause,
+    });
+    this.name = "RateLimitError";
+    this.action =
+      action ||
+      `Aguarde ${retryAfter || 60} segundos antes de tentar novamente.`;
+    this.statusCode = 429;
+    this.retryAfter = retryAfter;
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      action: this.action,
+      status_code: this.statusCode,
+    };
+  }
+}

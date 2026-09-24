@@ -2,6 +2,7 @@ import * as cookie from "cookie";
 import session from "models/session.js";
 import user from "models/user.js";
 import authorization from "models/authorization.js";
+import rateLimitModel from "models/rateLimit.js";
 
 import {
   InternalServerError,
@@ -10,6 +11,7 @@ import {
   NotFoundError,
   UnauthorizedError,
   ForbiddenError,
+  RateLimitError,
 } from "infra/errors";
 
 function onNoMatchHandler(request, response) {
@@ -23,6 +25,13 @@ function onErrorHandler(error, request, response) {
     error instanceof NotFoundError ||
     error instanceof ForbiddenError
   ) {
+    return response.status(error.statusCode).json(error);
+  }
+
+  if (error instanceof RateLimitError) {
+    if (error.retryAfter) {
+      response.setHeader("Retry-After", String(error.retryAfter));
+    }
     return response.status(error.statusCode).json(error);
   }
 
@@ -110,6 +119,46 @@ function canRequest(feature) {
   };
 }
 
+// O IP de quem pediu. Na Vercel ele chega no primeiro item do
+// `x-forwarded-for`; sem proxy, é o do socket.
+function getClientIp(request) {
+  const forwarded = request.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.length > 0) {
+    return forwarded.split(",")[0].trim();
+  }
+  return request.socket?.remoteAddress || "unknown";
+}
+
+function isLocalhost(ip) {
+  return (
+    ip === "127.0.0.1" ||
+    ip === "::1" ||
+    ip === "::ffff:127.0.0.1" ||
+    ip === "localhost"
+  );
+}
+
+// Limita quantas vezes um IP chama a rota numa janela — ver
+// `models/rateLimit.js`. Veio do repositório judhagsan, com o mesmo formato.
+function rateLimit({ key, limit, windowMs }) {
+  return async function rateLimitMiddleware(request, response, next) {
+    const ip = getClientIp(request);
+
+    // Fora de produção, localhost passa direto: é o que os testes e o
+    // desenvolvimento fazem o tempo todo, e produção nunca vê esse IP.
+    if (process.env.NODE_ENV !== "production" && isLocalhost(ip)) {
+      return next();
+    }
+
+    await rateLimitModel.check({
+      identifier: `${key}:${ip}`,
+      limit,
+      windowMs,
+    });
+    return next();
+  };
+}
+
 const controller = {
   errorHandlers: {
     onNoMatch: onNoMatchHandler,
@@ -119,6 +168,8 @@ const controller = {
   clearSessionCookie,
   injectAnonymousOrUser,
   canRequest,
+  rateLimit,
+  getClientIp,
 };
 
 export default controller;
