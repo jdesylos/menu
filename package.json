@@ -18,6 +18,7 @@
     "migrations:up:dev": "node-pg-migrate -m infra/migrations --envPath .env.development up",
     "migrations:up:dry": "node-pg-migrate -m infra/migrations --envPath .env.development --dry-run up",
     "places:import": "bash infra/scripts/import-places.sh",
+    "places:manual": "node --env-file-if-exists=.env.development infra/scripts/import-manual-places.mjs",
     "lint:prettier:check": "prettier --check .",
     "lint:prettier:fix": "prettier --write .",
     "lint:eslint:check": "eslint . --max-warnings 0",

@@ -36,6 +36,7 @@
 import fs from "node:fs";
 import readline from "node:readline";
 import database from "../database.js";
+import { upsertPlaces } from "./places-upsert.mjs";
 
 // Quantas linhas por INSERT. Quinhentas mantêm a consulta abaixo do limite de
 // parâmetros do Postgres com folga, e ainda assim fazem o país inteiro entrar
@@ -104,7 +105,7 @@ async function main() {
       batch.push(place);
 
       if (batch.length >= BATCH_SIZE) {
-        await upsert(client, batch);
+        await upsertPlaces(client, SOURCE, batch);
         imported += batch.length;
         batch = [];
         process.stdout.write(`\r      ${imported} carregados...`);
@@ -112,7 +113,7 @@ async function main() {
     }
 
     if (batch.length > 0) {
-      await upsert(client, batch);
+      await upsertPlaces(client, SOURCE, batch);
       imported += batch.length;
     }
 
@@ -281,64 +282,6 @@ function parseRow(fields) {
     locality: locality || null,
     region: region || null,
   };
-}
-
-// Quantos parâmetros cada linha ocupa no INSERT — a fonte mais as colunas do
-// CSV. Contar aqui em vez de escrever o número faz a conta acompanhar a lista
-// quando ela crescer de novo.
-const PARAMS_PER_ROW = 1 + COLUMNS.length;
-
-async function upsert(client, places) {
-  const values = [];
-  const rows = places.map((place, index) => {
-    const offset = index * PARAMS_PER_ROW;
-    values.push(
-      SOURCE,
-      place.sourceId,
-      place.name,
-      place.category,
-      place.latitude,
-      place.longitude,
-      place.neighborhood,
-      place.street,
-      place.postcode,
-      place.locality,
-      place.region,
-    );
-
-    const params = Array.from(
-      { length: PARAMS_PER_ROW },
-      (_, i) => `$${offset + i + 1}`,
-    );
-
-    return `(${params.join(", ")})`;
-  });
-
-  await client.query({
-    text: `
-      INSERT INTO
-        places (
-          source, source_id, name, category, latitude, longitude,
-          neighborhood, street, postcode, locality, region
-        )
-      VALUES
-        ${rows.join(", ")}
-      ON CONFLICT
-        (source, source_id)
-      DO UPDATE SET
-        name = EXCLUDED.name,
-        category = EXCLUDED.category,
-        latitude = EXCLUDED.latitude,
-        longitude = EXCLUDED.longitude,
-        neighborhood = EXCLUDED.neighborhood,
-        street = EXCLUDED.street,
-        postcode = EXCLUDED.postcode,
-        locality = EXCLUDED.locality,
-        region = EXCLUDED.region,
-        updated_at = timezone('utc', now())
-    ;`,
-    values,
-  });
 }
 
 main();
