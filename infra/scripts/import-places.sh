@@ -348,3 +348,10 @@ echo "[2/2] Carregando no banco..."
 # ambiente vence o arquivo.
 node --env-file-if-exists="$RAIZ/.env.development" \
     "$RAIZ/infra/scripts/import-places.mjs" "$CSV" "$FECHADOS"
+
+# Os lugares acrescentados à mão, que nenhuma fonte tem — ver
+# `import-manual-places.mjs`. A carga do Overture não os toca, porque tudo nela
+# filtra por `source`; rodar aqui é o que garante que a lista versionada e o
+# banco não se afastem sem ninguém notar.
+node --env-file-if-exists="$RAIZ/.env.development" \
+    "$RAIZ/infra/scripts/import-manual-places.mjs"

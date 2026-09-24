@@ -1,0 +1,15 @@
+[
+  {
+    "id": "tia-lourdes-butanta",
+    "name": "Restaurante Tia Lourdes",
+    "category": "brazilian_restaurant",
+    "latitude": -23.56895,
+    "longitude": -46.71486,
+    "street": "Av. Vital Brasil, 1250 - Loja 5B",
+    "neighborhood": "Butantã",
+    "locality": "São Paulo",
+    "region": "SP",
+    "postcode": "05503-000",
+    "fonte": "CNPJ 62.296.925/0001 nos dados abertos da Receita (2026-09): 'RESTAURANTE TIA LUORDES', assim mesmo, ativo desde 19/08/2025, na Av. Vital Brasil, 1250, loja 5B. O nome é o do perfil do próprio restaurante (@restaurantetialourdesoficial). Não estava no Overture 2026-09-23.0 nem no OpenStreetMap. O ponto é o do prédio, entre a Drogaria São Paulo e o Sukiya, e não o da porta."
+  }
+]
