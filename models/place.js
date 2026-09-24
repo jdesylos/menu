@@ -1,6 +1,6 @@
 import database from "infra/database.js";
 import tile from "models/tile.js";
-import { ValidationError } from "infra/errors.js";
+import { NotFoundError, ValidationError } from "infra/errors.js";
 
 // Abaixo de 14 um tile cobre uma cidade inteira, e a resposta seria de
 // milhares de lugares que o aplicativo não teria como desenhar sem virar uma
@@ -146,6 +146,7 @@ async function search({ term, latitude, longitude }) {
   const results = await database.query({
     text: `
       SELECT
+        id,
         name,
         category,
         latitude,
@@ -204,6 +205,7 @@ async function findWithinTile(coordinates) {
   const results = await database.query({
     text: `
       SELECT
+        id,
         name,
         category,
         latitude,
@@ -230,6 +232,46 @@ async function findWithinTile(coordinates) {
   return results.rows;
 }
 
+// Um lugar pelo id, visível ou não — quem chama decide o que fazer com o
+// oculto. Sem o lugar, `NotFoundError`, com o texto que o aplicativo mostra.
+async function findOneById(id) {
+  // Id que nem tem forma de UUID não existe, e passá-lo ao Postgres viraria
+  // erro de sintaxe — um 500 no lugar do 404.
+  if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
+    throw placeNotFound();
+  }
+
+  const results = await database.query({
+    text: `
+      SELECT
+        *
+      FROM
+        places
+      WHERE
+        id = $1
+      LIMIT
+        1
+    ;`,
+    values: [id],
+  });
+
+  if (results.rowCount === 0) {
+    throw placeNotFound();
+  }
+
+  return results.rows[0];
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function placeNotFound() {
+  return new NotFoundError({
+    message: "O lugar informado não foi encontrado.",
+    action: "Verifique se o lugar ainda aparece no mapa e tente de novo.",
+  });
+}
+
 const place = {
   MIN_ZOOM,
   MAX_ZOOM,
@@ -240,6 +282,8 @@ const place = {
   findWithinTile,
   parseSearch,
   search,
+  findOneById,
+  UUID_PATTERN,
 };
 
 export default place;

@@ -1,6 +1,14 @@
 import { InternalServerError } from "infra/errors.js";
 
 const availableFeatures = [
+  // ADMIN
+  // Marcador de quem modera o mapa. Não concede nada por si, como no
+  // repositório judhagsan: cada ação continua exigindo a sua feature granular
+  // (`manage:place` e companhia). "Enxerga a moderação" e "pode aceitar uma
+  // sugestão" são perguntas diferentes, e quem ganhar uma por um motivo
+  // pontual não herda a outra sem ninguém ter decidido isso.
+  "admin",
+
   // USER
   "create:user",
   "read:user",
@@ -22,6 +30,21 @@ const availableFeatures = [
   // STATUS
   "read:status",
   "read:status:all",
+
+  // PLACE
+  // Sugerir um lugar que o mapa não tem. Toda conta ativada tem.
+  "create:place",
+  // Sugerir correção, "fechou" ou "é duplicata" num lugar que existe. Toda
+  // conta ativada tem.
+  "update:place",
+  // Aceitar e recusar sugestões — o que muda o mapa de todo mundo. Vai para
+  // quem tem `admin`, por migration, e não é efeito colateral de `admin`.
+  "manage:place",
+  // Chave de formatação do `filterOutput`, não permissão: nenhuma rota exige
+  // esta feature, e concedê-la a alguém não muda nada. Fica na lista porque
+  // `validateFeature()` recusa nome desconhecido — como o `read:user` do
+  // repositório judhagsan.
+  "read:place_suggestion",
 ];
 
 function can(user, feature, resource) {
@@ -98,6 +121,24 @@ function filterOutput(user, feature, resource) {
       updated_at: resource.updated_at,
       expires_at: resource.expires_at,
       used_at: resource.used_at,
+    };
+  }
+
+  // Quem mandou a sugestão sai só pelo id: username e email de quem sugere não
+  // são assunto de quem revisa.
+  if (feature === "read:place_suggestion") {
+    return {
+      id: resource.id,
+      kind: resource.kind,
+      place_id: resource.place_id,
+      duplicate_of: resource.duplicate_of,
+      changes: resource.changes,
+      status: resource.status,
+      created_by: resource.created_by,
+      reviewed_by: resource.reviewed_by,
+      reviewed_at: resource.reviewed_at,
+      created_at: resource.created_at,
+      updated_at: resource.updated_at,
     };
   }
 

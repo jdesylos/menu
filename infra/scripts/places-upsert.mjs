@@ -34,7 +34,9 @@ const LOAD_REASONS = ["closed", "duplicate", "missing_from_source"];
 // Grava os lugares de UMA fonte, atualizando os que já existem.
 //
 // A chave é (source, source_id): o mesmo lugar carregado de novo atualiza a
-// linha em vez de duplicá-la. Cabe ao chamador não passar lotes grandes
+// linha em vez de duplicá-la. O que uma sugestão aceita corrigiu fica: cada
+// campo com valor em `overrides` vence o que a fonte mandou — ver a migration
+// "create-place-suggestions". Cabe ao chamador não passar lotes grandes
 // demais — ver o BATCH_SIZE do `import-places.mjs`.
 export async function upsertPlaces(client, source, places) {
   const values = [];
@@ -62,15 +64,24 @@ export async function upsertPlaces(client, source, places) {
       ON CONFLICT
         (source, source_id)
       DO UPDATE SET
-        name = EXCLUDED.name,
-        category = EXCLUDED.category,
-        latitude = EXCLUDED.latitude,
-        longitude = EXCLUDED.longitude,
-        neighborhood = EXCLUDED.neighborhood,
-        street = EXCLUDED.street,
-        postcode = EXCLUDED.postcode,
-        locality = EXCLUDED.locality,
-        region = EXCLUDED.region,
+        name = coalesce(places.overrides->>'name', EXCLUDED.name),
+        category = coalesce(places.overrides->>'category', EXCLUDED.category),
+        latitude = coalesce(
+          (places.overrides->>'latitude')::double precision,
+          EXCLUDED.latitude
+        ),
+        longitude = coalesce(
+          (places.overrides->>'longitude')::double precision,
+          EXCLUDED.longitude
+        ),
+        neighborhood = coalesce(
+          places.overrides->>'neighborhood',
+          EXCLUDED.neighborhood
+        ),
+        street = coalesce(places.overrides->>'street', EXCLUDED.street),
+        postcode = coalesce(places.overrides->>'postcode', EXCLUDED.postcode),
+        locality = coalesce(places.overrides->>'locality', EXCLUDED.locality),
+        region = coalesce(places.overrides->>'region', EXCLUDED.region),
         hidden_at = CASE
           WHEN places.hidden_reason = ANY($${values.length + 1}::text[]) THEN NULL
           ELSE places.hidden_at

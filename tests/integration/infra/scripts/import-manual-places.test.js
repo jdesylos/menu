@@ -78,6 +78,7 @@ describe("infra/scripts/import-manual-places.mjs", () => {
     const responseBody = await response.json();
     expect(responseBody.places).toEqual([
       {
+        id: responseBody.places[0].id,
         name: "Restaurante Tia Lourdes",
         category: "brazilian_restaurant",
         latitude: -23.56895,

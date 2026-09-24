@@ -178,6 +178,39 @@ describe("infra/scripts/import-places.mjs", () => {
     expect(hidden.rows[0].n).toBe(0);
   });
 
+  // A correção aceita vence o Overture: sem isso, a carga seguinte desfaria o
+  // que alguém revisou e aceitou.
+  test("With a corrected place", async () => {
+    await importPlaces(placesCsv(BAR_A));
+    await database.query(`
+      UPDATE places
+      SET name = 'Bar A Corrigido', overrides = '{"name": "Bar A Corrigido"}'
+      WHERE source_id = 'ov-a'
+    ;`);
+
+    await importPlaces(placesCsv(BAR_A));
+
+    const result = await database.query(
+      "SELECT name, category FROM places WHERE source_id = 'ov-a';",
+    );
+    expect(result.rows).toEqual([{ name: "Bar A Corrigido", category: "bar" }]);
+  });
+
+  // "Fechou" confirmado por gente não é desfeito pela carga, mesmo com o
+  // Overture ainda publicando o lugar.
+  test("With a place a person reported closed", async () => {
+    await importPlaces(placesCsv(BAR_A));
+    await database.query(`
+      UPDATE places
+      SET hidden_at = now(), hidden_reason = 'reported_closed'
+      WHERE source_id = 'ov-a'
+    ;`);
+
+    await importPlaces(placesCsv(BAR_A));
+
+    expect((await place("ov-a")).hidden_reason).toBe("reported_closed");
+  });
+
   // O oculto sai das duas rotas que o aplicativo usa: a busca e o tile.
   test("With the routes", async () => {
     await importPlaces(placesCsv(BAR_A, BAR_B));

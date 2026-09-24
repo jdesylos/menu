@@ -76,6 +76,8 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
       const responseBody = await response.json();
       expect(responseBody.places).toEqual([
         {
+          // O id é o que o aplicativo manda numa sugestão sobre o lugar.
+          id: responseBody.places[0].id,
           name: "Bar do Teste",
           category: "bar",
           latitude: -23.5505,
@@ -120,6 +122,7 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
       );
 
       expect(lugar).toEqual({
+        id: lugar.id,
         name: "Saracura Gastrobar",
         category: "bar",
         latitude: -23.5505,
