@@ -50,11 +50,15 @@ function filterOutput(user, feature, resource) {
   validateFeature(feature);
   validateResource(resource);
 
+  // A visão de um usuário sobre OUTRO não traz `features`: a lista é o mapa
+  // de privilégios da conta, e exposta diria a qualquer um quem pode rodar
+  // migration ou mexer em outra conta — em quem mirar antes de tentar
+  // qualquer coisa. Quem precisa dela lê a própria conta, por
+  // `read:user:self`. Veio do repositório judhagsan.
   if (feature === "read:user") {
     return {
       id: resource.id,
       username: resource.username,
-      features: resource.features,
       created_at: resource.created_at,
       updated_at: resource.updated_at,
     };

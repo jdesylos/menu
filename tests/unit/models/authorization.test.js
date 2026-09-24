@@ -96,10 +96,11 @@ describe("models/authorization.js", () => {
         resource,
       );
 
+      // Sem `features` e sem `email`: a lista de features é o mapa de
+      // privilégios da conta, e não sai na visão de um usuário sobre outro.
       expect(result).toEqual({
         id: 1,
         username: "resource",
-        features: ["read:user"],
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
       });
