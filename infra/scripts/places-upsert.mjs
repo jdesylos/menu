@@ -24,6 +24,13 @@ const FIELDS = [
 // quando ela crescer de novo.
 const PARAMS_PER_ROW = 1 + FIELDS.length;
 
+// Os motivos de ocultar que são da própria carga — ver a migration
+// "ocultar-places-em-vez-de-apagar". Um lugar oculto por um deles que volta a
+// vir no dado volta ao mapa: o Foursquare deixou de dizer que fechou, o
+// Overture o publicou de novo, a regra de duplicata deixou de casá-lo. Motivo
+// de outra origem fica: a carga não desfaz o que ela não fez.
+const LOAD_REASONS = ["closed", "duplicate", "missing_from_source"];
+
 // Grava os lugares de UMA fonte, atualizando os que já existem.
 //
 // A chave é (source, source_id): o mesmo lugar carregado de novo atualiza a
@@ -64,8 +71,20 @@ export async function upsertPlaces(client, source, places) {
         postcode = EXCLUDED.postcode,
         locality = EXCLUDED.locality,
         region = EXCLUDED.region,
+        hidden_at = CASE
+          WHEN places.hidden_reason = ANY($${values.length + 1}::text[]) THEN NULL
+          ELSE places.hidden_at
+        END,
+        hidden_reason = CASE
+          WHEN places.hidden_reason = ANY($${values.length + 1}::text[]) THEN NULL
+          ELSE places.hidden_reason
+        END,
+        duplicate_of = CASE
+          WHEN places.hidden_reason = ANY($${values.length + 1}::text[]) THEN NULL
+          ELSE places.duplicate_of
+        END,
         updated_at = timezone('utc', now())
     ;`,
-    values,
+    values: [...values, LOAD_REASONS],
   });
 }

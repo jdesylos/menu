@@ -48,6 +48,15 @@ RELEASE="${OVERTURE_RELEASE:-2026-09-23.0}"
 # carga segue só com o Overture, como era antes, e avisa.
 FSQ_RELEASE="${FSQ_RELEASE:-2026-09-15}"
 
+# A carga cobre o país inteiro quando ninguém recortou a caixa nem trocou o
+# país. Só aí "não veio no CSV" quer dizer "sumiu do Overture", e o
+# import-places.mjs pode tirar do mapa o que sumiu — ver o comentário dele.
+if [ -z "${OESTE:-}${SUL:-}${LESTE:-}${NORTE:-}${PAIS:-}" ]; then
+    PAIS_INTEIRO="--pais-inteiro"
+else
+    PAIS_INTEIRO=""
+fi
+
 # A caixa de `models/tile.js` — Brasil com folga. Ela sozinha pega 1,5 milhão de
 # lugares de Argentina, Chile, Colômbia e vizinhos, então o país entra como
 # filtro de verdade logo abaixo; a caixa fica porque é ela que deixa o DuckDB
@@ -329,9 +338,8 @@ CREATE TEMP TABLE lugares AS
 
 $FECHADOS_SQL
 
--- O que fechou não entra, e sai do banco se já estava lá: o upsert sozinho só
--- acrescenta e atualiza, e um lugar ausente do CSV ficaria na tabela para
--- sempre.
+-- O que fechou não entra no CSV, e o import-places.mjs o oculta se já estava
+-- no banco: o upsert sozinho só acrescenta e atualiza.
 COPY (
   SELECT * FROM lugares WHERE source_id NOT IN (SELECT source_id FROM fechados)
 ) TO '$CSV' (FORMAT CSV, HEADER);
@@ -346,8 +354,13 @@ echo "[2/2] Carregando no banco..."
 # `--env-file-if-exists` para a carga local achar o Postgres do `compose.yaml`
 # sem ninguém exportar nada. Em produção não atrapalha: variável já definida no
 # ambiente vence o arquivo.
+#
+# $PAIS_INTEIRO fica sem aspas de propósito: vazio, ele some da linha em vez de
+# virar um argumento vazio.
+# shellcheck disable=SC2086
 node --env-file-if-exists="$RAIZ/.env.development" \
-    "$RAIZ/infra/scripts/import-places.mjs" "$CSV" "$FECHADOS"
+    "$RAIZ/infra/scripts/import-places.mjs" "$CSV" \
+    --fechados="$FECHADOS" $PAIS_INTEIRO
 
 # Os lugares acrescentados à mão, que nenhuma fonte tem — ver
 # `import-manual-places.mjs`. A carga do Overture não os toca, porque tudo nela

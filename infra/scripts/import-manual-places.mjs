@@ -13,12 +13,13 @@
 // leva uma `fonte` obrigatória — de onde se sabe que o lugar existe — que não
 // vai para o banco: o histórico do git é o lugar dela.
 //
-// # O que ele apaga
+// # O que ele tira do mapa
 //
-// Os lugares `manual` que SAÍRAM do arquivo. Ao contrário da carga do
-// Overture, aqui apagar o que não veio é seguro: o arquivo é sempre a lista
-// inteira, e não um recorte do país. Tirar uma entrada do arquivo e rodar isto
-// tira o lugar do mapa.
+// Os lugares `manual` que SAÍRAM do arquivo — ocultados, e não apagados, como
+// na carga do Overture (ver a migration "ocultar-places-em-vez-de-apagar").
+// Aqui não é preciso cuidado com recorte: o arquivo é sempre a lista inteira,
+// e não um pedaço do país. Tirar uma entrada do arquivo e rodar isto tira o
+// lugar do mapa; devolvê-la ao arquivo o traz de volta.
 //
 // Os lugares do Overture não são tocados: tudo aqui filtra por `source`.
 //
@@ -69,14 +70,14 @@ async function main() {
     if (places.length > 0) {
       await upsertPlaces(client, SOURCE, places);
     }
-    const removed = await removeMissing(
+    const hidden = await hideMissing(
       client,
       places.map((place) => place.sourceId),
     );
 
     await client.query("COMMIT");
     console.log(
-      `      ${places.length} lugares manuais carregados, ${removed} removidos`,
+      `      ${places.length} lugares manuais carregados, ${hidden} ocultados`,
     );
   } catch (error) {
     await client.query("ROLLBACK");
@@ -89,7 +90,7 @@ async function main() {
 // Lê e confere o arquivo INTEIRO antes de tocar no banco.
 //
 // Uma entrada errada derruba a carga toda, e não só ela: pular a entrada torta
-// e seguir faria o `removeMissing` apagar do banco um lugar que continua no
+// e seguir faria o `hideMissing` tirar do mapa um lugar que continua no
 // arquivo.
 function readPlaces(filePath) {
   const entries = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -150,14 +151,18 @@ function readPlaces(filePath) {
   return places;
 }
 
-async function removeMissing(client, sourceIds) {
+async function hideMissing(client, sourceIds) {
   const result = await client.query({
     text: `
-      DELETE FROM
+      UPDATE
         places
+      SET
+        hidden_at = timezone('utc', now()),
+        hidden_reason = 'missing_from_source'
       WHERE
         source = $1
         AND NOT (source_id = ANY($2::text[]))
+        AND hidden_at IS NULL
     ;`,
     values: [SOURCE, sourceIds],
   });

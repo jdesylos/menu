@@ -159,6 +159,7 @@ async function search({ term, latitude, longitude }) {
         places
       WHERE
         sem_acento(name) ILIKE sem_acento($1) ESCAPE '\\'
+        AND hidden_at IS NULL
       ORDER BY
         ${ordering.join(",\n        ")}
       LIMIT
@@ -193,6 +194,10 @@ function escapeLike(term) {
 // "SnowFall Brasil" sumia do mapa — Udon Jinbei, Thai Chef, Sushi Kenzo. O id
 // é um UUID aleatório, então o corte vira uma amostra espalhada pelo tile
 // inteiro, a mesma a cada pedido, e sai do índice da chave primária.
+//
+// O que está oculto não entra — fechou, é duplicata de outro ou sumiu da
+// fonte; ver a migration "ocultar-places-em-vez-de-apagar". A busca aplica o
+// mesmo filtro.
 async function findWithinTile(coordinates) {
   const { west, east, south, north } = tile.bounds(coordinates);
 
@@ -213,6 +218,7 @@ async function findWithinTile(coordinates) {
       WHERE
         latitude BETWEEN $1 AND $2
         AND longitude BETWEEN $3 AND $4
+        AND hidden_at IS NULL
       ORDER BY
         id
       LIMIT
