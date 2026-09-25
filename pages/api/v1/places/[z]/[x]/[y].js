@@ -17,11 +17,16 @@ import place from "models/place.js";
 // os restaurantes sumirem da tela.
 export default createRouter().get(getHandler).handler(controller.errorHandlers);
 
-// O Overture publica um release por mês, então nada aqui envelhece rápido. Um
-// dia no aparelho e trinta no CDN, com `stale-while-revalidate` para a borda
-// nunca fazer o usuário esperar pela revalidação — o mesmo que os tiles usam.
+// Uma hora, no aparelho e na borda, com `stale-while-revalidate` para a borda
+// nunca fazer o usuário esperar pela revalidação.
+//
+// Eram trinta dias no CDN, quando o dado só mudava com o release mensal do
+// Overture. Com sugestões de usuário, uma correção aceita — ver
+// `models/placeSuggestion.js` — levaria até um mês para aparecer no mapa. O
+// preço é o banco responder cada tile uma vez por hora por região da borda, em
+// vez de uma vez por mês.
 const CACHE_CONTROL =
-  "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=604800";
+  "public, max-age=3600, s-maxage=3600, stale-while-revalidate=86400";
 
 async function getHandler(request, response) {
   const coordinates = place.parseCoordinates(request.query);

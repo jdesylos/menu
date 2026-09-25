@@ -41,9 +41,15 @@ function writeList(entries) {
   return filePath;
 }
 
-async function placesBySource(source) {
+// Os lugares de uma fonte que estão no mapa — os ocultos ficam de fora, como
+// ficam das rotas.
+async function visibleBySource(source) {
   const result = await database.query({
-    text: "SELECT source_id, name FROM places WHERE source = $1 ORDER BY source_id;",
+    text: `
+      SELECT source_id, name FROM places
+      WHERE source = $1 AND hidden_at IS NULL
+      ORDER BY source_id
+    ;`,
     values: [source],
   });
   return result.rows;
@@ -72,6 +78,7 @@ describe("infra/scripts/import-manual-places.mjs", () => {
     const responseBody = await response.json();
     expect(responseBody.places).toEqual([
       {
+        id: responseBody.places[0].id,
         name: "Restaurante Tia Lourdes",
         category: "brazilian_restaurant",
         latitude: -23.56895,
@@ -85,8 +92,8 @@ describe("infra/scripts/import-manual-places.mjs", () => {
     ]);
   });
 
-  // O arquivo é a lista inteira: o que sai dele sai do banco. E só o que é
-  // "manual" — o lugar do Overture continua onde estava.
+  // O arquivo é a lista inteira: o que sai dele sai do mapa — oculto, e não
+  // apagado. E só o que é "manual": o lugar do Overture continua onde estava.
   test("With an entry removed from the file", async () => {
     await database.query({
       text: `
@@ -99,11 +106,28 @@ describe("infra/scripts/import-manual-places.mjs", () => {
     const result = await importManual(writeList([PADARIA]));
     expect(result.code).toBe(0);
 
-    expect(await placesBySource("manual")).toEqual([
+    expect(await visibleBySource("manual")).toEqual([
       { source_id: "padaria-teste", name: "Padaria de Teste" },
     ]);
-    expect(await placesBySource("overture")).toEqual([
+    expect(await visibleBySource("overture")).toEqual([
       { source_id: "ov-1", name: "Bar do Overture" },
+    ]);
+
+    const hidden = await database.query(
+      "SELECT hidden_reason FROM places WHERE source_id = 'tia-lourdes-butanta';",
+    );
+    expect(hidden.rows).toEqual([{ hidden_reason: "missing_from_source" }]);
+  });
+
+  // Voltar ao arquivo traz o lugar de volta ao mapa.
+  test("With an entry back in the file", async () => {
+    await importManual(writeList([PADARIA]));
+    await importManual(writeList([]));
+    expect(await visibleBySource("manual")).toEqual([]);
+
+    await importManual(writeList([PADARIA]));
+    expect(await visibleBySource("manual")).toEqual([
+      { source_id: "padaria-teste", name: "Padaria de Teste" },
     ]);
   });
 
@@ -127,7 +151,7 @@ describe("infra/scripts/import-manual-places.mjs", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain('falta "fonte"');
     expect(result.stderr).toContain("fora do Brasil");
-    expect(await placesBySource("manual")).toEqual([
+    expect(await visibleBySource("manual")).toEqual([
       { source_id: "padaria-teste", name: "Padaria de Teste" },
     ]);
   });

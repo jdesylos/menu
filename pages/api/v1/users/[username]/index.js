@@ -6,7 +6,10 @@ import { ForbiddenError } from "infra/errors.js";
 
 export default createRouter()
   .use(controller.injectAnonymousOrUser)
-  .get(getHandler)
+  // Exige sessão: aberta, a rota respondia 200 para quem existe e 404 para quem
+  // não existe, o que basta para levantar a lista de cadastrados. Nenhum
+  // consumidor anônimo a chama. Veio do repositório judhagsan.
+  .get(controller.canRequest("read:session"), getHandler)
   .patch(controller.canRequest("update:user"), patchHandler)
   .handler(controller.errorHandlers);
 

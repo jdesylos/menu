@@ -98,6 +98,7 @@ describe("GET /api/v1/places", () => {
       const responseBody = await response.json();
       expect(responseBody.places).toEqual([
         {
+          id: responseBody.places[0].id,
           name: "Saracura Gastrobar",
           category: "bar",
           latitude: -23.5548,

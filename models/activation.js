@@ -102,6 +102,8 @@ async function activateUserByUserId(userId) {
     "create:session",
     "read:session",
     "update:user",
+    "create:place",
+    "update:place",
   ]);
   return activatedUser;
 }

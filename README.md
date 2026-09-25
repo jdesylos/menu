@@ -76,7 +76,7 @@ terminar.
 | `GET /status`                          | Atalho para o endpoint de status   |
 | `GET /api/v1/status`                   | Status do sistema e do banco       |
 | `POST /api/v1/users`                   | Cria uma conta                     |
-| `GET /api/v1/users/[username]`         | Dados públicos de um usuário       |
+| `GET /api/v1/users/[username]`         | Dados de outro usuário (sessão)    |
 | `PATCH /api/v1/users/[username]`       | Atualiza um usuário                |
 | `GET /api/v1/user`                     | Usuário da sessão atual            |
 | `POST /api/v1/sessions`                | Login                              |
@@ -85,9 +85,20 @@ terminar.
 | `GET /api/v1/migrations`               | Lista as migrations pendentes      |
 | `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
 | `GET /api/v1/tiles/[z]/[x]/[y]`        | Tile vetorial do mapa              |
+| `GET /api/v1/places/[z]/[x]/[y]`       | Lugares de comer dentro de um tile |
+| `GET /api/v1/places?q=`                | Busca de lugares por nome          |
+| `POST /api/v1/suggestions`             | Sugere um lugar ou uma mudança     |
+| `GET /api/v1/suggestions`              | As próprias sugestões, ou a fila   |
+| `PATCH /api/v1/suggestions/[id]`       | Aceita ou recusa uma sugestão      |
 
-A sessão é entregue em um cookie `session_id` (`httpOnly`), então o cliente precisa enviar
-as requisições com credenciais.
+A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
+do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
+nas chamadas seguintes, como o Pindorama faz com o judhagsan.
+
+O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After` depois
+disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
+repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
+a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
 
 ### Tiles do mapa
 
@@ -116,14 +127,23 @@ olhando, e uma sessão vencida não pode fazer os restaurantes sumirem da tela.
 {
   "places": [
     {
+      "id": "0b1f…",
       "name": "Pizzaria Calipso",
       "category": "pizza_restaurant",
       "latitude": -23.5351,
-      "longitude": -46.4654
+      "longitude": -46.4654,
+      "street": "Av. Campanella, 610",
+      "neighborhood": "Itaquera",
+      "locality": "São Paulo",
+      "region": "SP",
+      "postcode": "08220-830"
     }
   ]
 }
 ```
+
+O `id` é o que o aplicativo manda numa sugestão sobre o lugar. O `Cache-Control` guarda uma
+hora no aparelho e no CDN: uma sugestão aceita aparece no mapa em até uma hora.
 
 Endereçada por tile, e não por raio, porque é assim que o aplicativo já pede o mapa — ele
 tem cache por tile e descarta o que saiu da tela. Zoom aceito: **14 a 18** (abaixo disso um
@@ -140,14 +160,39 @@ diferente do ODbL do basemap.
 O Overture não sabe quem **fechou**: o status de funcionamento dele vem vazio, e 93% dos
 lugares de São Paulo vêm de páginas do Facebook, que ficam no ar anos depois de o
 restaurante fechar. Quem diz isso é o [Foursquare OS Places](https://opensource.foursquare.com/os-places/)
-(Apache 2.0), cruzado na carga: o lugar que ele dá como fechado **sai do banco**. Do
-Foursquare não se guarda nada — ele só decide quem sai. No Brasil, nos releases fixados,
-isso tira 10.490 de 605.021 lugares (1,7%); a regra está comentada no script.
+(Apache 2.0), cruzado na carga. Do Foursquare não se guarda nada — ele só decide quem sai.
 
-O que conta como "lugar de comer" é uma **lista explícita** de categorias na consulta de
-`infra/scripts/import-places.sh`, mais o sufixo `_restaurant`. A taxonomia do Overture tem
-1508 categorias só no Brasil, e casar por pedaço de nome não funciona: procurar `bar`
-traz `barber`, e `pub` traz `public_school` e `notary_public`.
+Nada sai do mapa apagado: o lugar é **ocultado**, com o motivo em `hidden_reason`. A carga
+oculta o que fechou, a duplicata (o mesmo negócio com duas páginas no Facebook, apontando
+para o que ficou) e, numa carga do país inteiro, o que sumiu do release. O que ela ocultou e
+volta a vir no dado volta ao mapa; o que uma pessoa decidiu (ver abaixo) ela não desfaz. As
+regras e as medições estão comentadas em `infra/scripts/import-places.sh`.
+
+O que conta como "lugar de comer" é a raiz `food_and_drink` da taxonomia do Overture, menos
+doceria, lan house e sala VIP. O lugar que nenhuma fonte tem entra pela lista versionada
+`infra/data/manual-places.json` (`npm run places:manual`).
+
+### Sugestões e moderação
+
+O usuário não escreve no mapa: ele **sugere**, e a sugestão só muda o mapa quando alguém a
+aceita. São quatro tipos — `create` (um lugar novo), `update` (nome, categoria, endereço ou
+posição), `close` (fechou) e `duplicate` (é o mesmo que outro).
+
+| Feature        | Quem tem                        | O que permite                           |
+| -------------- | ------------------------------- | --------------------------------------- |
+| `create:place` | toda conta ativada              | sugerir um lugar novo                   |
+| `update:place` | toda conta ativada              | sugerir correção, "fechou" ou duplicata |
+| `admin`        | dada à mão                      | nada sozinha: marca quem modera         |
+| `manage:place` | quem tem `admin`, por migration | aceitar e recusar sugestões             |
+
+`admin` segue o repositório judhagsan: é um marcador, e cada ação exige a sua feature
+granular. Para tornar alguém moderador, as duas vão juntas:
+`user.addFeatures(id, ["admin", "manage:place"])`. A sugestão de quem tem `manage:place`
+já entra aceita.
+
+A correção aceita vai para as colunas do lugar **e** para `places.overrides`, que a carga
+do Overture reaplica por cima do que ela trouxer — sem isso, o release seguinte desfaria a
+correção.
 
 ## Deploy
 

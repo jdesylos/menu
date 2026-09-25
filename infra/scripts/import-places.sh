@@ -48,6 +48,15 @@ RELEASE="${OVERTURE_RELEASE:-2026-09-23.0}"
 # carga segue só com o Overture, como era antes, e avisa.
 FSQ_RELEASE="${FSQ_RELEASE:-2026-09-15}"
 
+# A carga cobre o país inteiro quando ninguém recortou a caixa nem trocou o
+# país. Só aí "não veio no CSV" quer dizer "sumiu do Overture", e o
+# import-places.mjs pode tirar do mapa o que sumiu — ver o comentário dele.
+if [ -z "${OESTE:-}${SUL:-}${LESTE:-}${NORTE:-}${PAIS:-}" ]; then
+    PAIS_INTEIRO="--pais-inteiro"
+else
+    PAIS_INTEIRO=""
+fi
+
 # A caixa de `models/tile.js` — Brasil com folga. Ela sozinha pega 1,5 milhão de
 # lugares de Argentina, Chile, Colômbia e vizinhos, então o país entra como
 # filtro de verdade logo abaixo; a caixa fica porque é ela que deixa o DuckDB
@@ -91,7 +100,8 @@ fi
 
 CSV="$(mktemp -t places).csv"
 FECHADOS="$(mktemp -t fechados).csv"
-trap 'rm -f "$CSV" "$FECHADOS"' EXIT
+DUPLICADOS="$(mktemp -t duplicados).csv"
+trap 'rm -f "$CSV" "$FECHADOS" "$DUPLICADOS"' EXIT
 
 # Quem fechou, segundo o Foursquare — ou ninguém, sem o token.
 #
@@ -203,6 +213,39 @@ else
     FECHADOS_SQL="CREATE TEMP TABLE fechados (source_id VARCHAR);"
 fi
 
+# Quem é duplicata.
+#
+# O Overture publica o mesmo lugar duas vezes, quase sempre porque o negócio
+# tem duas páginas no Facebook: "King Açai e Batataria" e "King Restaurante -
+# Itaquera", a 3 m uma da outra na Av. Campanella, 610 — e o site da segunda é
+# linktr.ee/kingacaiebatataria. Dois lugares a menos de 30 m são o mesmo quando:
+#
+# - um nome contém o outro, com pelo menos seis letras no menor, e o menor não
+#   é uma palavra genérica ("Barbatanas" e "Barbatanas Peixe Bar"). É a mesma
+#   trava da regra do Foursquare, acima;
+# - ou o site de um traz o nome do outro, E os dois dividem uma palavra do nome
+#   que não é genérica, E têm o mesmo número na rua. É a do King.
+#
+# Medido na cidade de São Paulo, no release 2026-09-23.0: 212 pares pela
+# primeira regra, com 7 de 8 certos numa amostra, e 33 pela segunda, com 26
+# certos. Descartadas, porque juntavam lugares diferentes: telefone igual (693
+# pares — a central do shopping atende por todas as lojas), palavra e número
+# sem o site (526 — "Tokyo Burguer" e "Tokyo sushi") e o site sem palavra e
+# número (164 — o bairro no endereço do site: "Higienópolis" com "China In
+# Box").
+#
+# Fica o mais completo, e o que sai é ocultado apontando para ele — ver o SQL
+# da posição, abaixo, e o import-places.mjs.
+#
+# Na caixa da cidade de São Paulo as duas regras juntas dão 242 duplicatas, e o
+# King que fica é o "King Açai e Batataria": empata em completude com o outro,
+# e é o nome que o site do outro publica.
+#
+# O limite: a segunda regra ainda junta negócios diferentes na mesma porta —
+# o "Gogo Curry Kazu" funciona dentro do "Espaço Kazu", na Thomaz Gonzaga, 84,
+# e sai do mapa como duplicata dele. O que sumir assim volta pela lista
+# manual, infra/data/manual-places.json.
+
 echo "[1/2] Extraindo do Overture (release $RELEASE) e do Foursquare (release $FSQ_RELEASE)..."
 
 # O que conta como "onde se come": a raiz `food_and_drink` da taxonomia do
@@ -301,7 +344,11 @@ CREATE TEMP TABLE lugares AS
     p.street,
     p.postcode,
     p.locality,
-    p.region
+    p.region,
+    -- Não vão para o banco: servem só para achar duplicatas, abaixo.
+    p.websites,
+    p.socials,
+    p.confidence
   FROM (
   SELECT
     id AS source_id,
@@ -312,7 +359,10 @@ CREATE TEMP TABLE lugares AS
     addresses[1].freeform AS street,
     addresses[1].postcode AS postcode,
     addresses[1].locality AS locality,
-    addresses[1].region AS region
+    addresses[1].region AS region,
+    websites,
+    socials,
+    confidence
   FROM read_parquet(
     's3://overturemaps-us-west-2/release/$RELEASE/theme=places/type=place/*',
     hive_partitioning = 1
@@ -329,25 +379,198 @@ CREATE TEMP TABLE lugares AS
 
 $FECHADOS_SQL
 
--- O que fechou não entra, e sai do banco se já estava lá: o upsert sozinho só
--- acrescenta e atualiza, e um lugar ausente do CSV ficaria na tabela para
--- sempre.
+-- As duplicatas. A regra e o porquê estão no comentário do shell, acima de
+-- "Quem é duplicata".
+CREATE OR REPLACE MACRO normalizado(s) AS
+  regexp_replace(lower(strip_accents(coalesce(s, ''))), '[^a-z0-9]', '', 'g');
+
+-- Palavras que aparecem no nome de muito lugar diferente: sozinhas, não dizem
+-- que dois lugares são o mesmo.
+SET VARIABLE palavras_genericas = [
+  'almoco','restaurante','restaurant','lanchonete','lanches','lanche','pizzaria',
+  'pizza','padaria','panificadora','bakery','churrascaria','pastelaria','pastel',
+  'sorveteria','cafeteria','confeitaria','doceria','hamburgueria','burger',
+  'burguer','sushi','temakeria','espetinho','cervejaria','choperia','petiscaria',
+  'boteco','botequim','quiosque','delivery','marmitex','marmitaria','selfservice',
+  'rodizio','comida','cantina','bistro','acai','cafe','coffee','food','grill',
+  'casa','point','espaco','adega','emporio','mercearia','sabor','sabores',
+  'gourmet','kitchen','house','express','mais','novo','nova','unidade','filial',
+  'loja','shopping','centro','jardim','vila','paulo'
+];
+
+CREATE TEMP TABLE candidatos AS
+SELECT
+  source_id,
+  confidence,
+  normalizado(name) AS n,
+  regexp_extract(coalesce(street, ''), '([0-9]+)', 1) AS numero,
+  (street IS NOT NULL)::INT + (postcode IS NOT NULL)::INT
+    + (locality IS NOT NULL)::INT + (region IS NOT NULL)::INT
+    + (neighborhood IS NOT NULL)::INT + (category IS NOT NULL)::INT AS completude,
+  latitude,
+  longitude,
+  floor(latitude / 0.0003)::BIGINT AS cy,
+  floor(longitude / 0.0003)::BIGINT AS cx,
+  list_filter(
+    regexp_split_to_array(lower(strip_accents(name)), '[^a-z0-9]+'),
+    lambda t: length(t) >= 4
+      AND NOT list_contains(getvariable('palavras_genericas'), t)
+  ) AS palavras,
+  list_transform(
+    coalesce(websites, []) || coalesce(socials, []),
+    lambda u: normalizado(regexp_replace(
+      u, '^https?://(www[.])?(linktr[.]ee|instagram[.]com|facebook[.]com)?/?', ''
+    ))
+  ) AS sites
+FROM lugares
+WHERE source_id NOT IN (SELECT source_id FROM fechados);
+
+-- Cada par a menos de 30 m, e se ele casa por uma das duas regras. A grade de
+-- 0,0003 grau (uns 33 m) é o que evita comparar tudo com tudo.
+CREATE TEMP TABLE pares_dup AS
+WITH perto AS (
+  SELECT
+    a.source_id AS id_a,
+    b.source_id AS id_b,
+    (a.n = b.n AND length(a.n) >= 3)
+      OR (
+        least(length(a.n), length(b.n)) >= 6
+        AND (contains(a.n, b.n) OR contains(b.n, a.n))
+        AND NOT list_contains(
+          getvariable('palavras_genericas'),
+          CASE WHEN length(a.n) < length(b.n) THEN a.n ELSE b.n END
+        )
+      ) AS pelo_nome,
+    length(a.n) >= 6 AND len(list_filter(b.sites, lambda s: contains(s, a.n))) > 0
+      AS marca_a,
+    length(b.n) >= 6 AND len(list_filter(a.sites, lambda s: contains(s, b.n))) > 0
+      AS marca_b,
+    a.numero <> '' AND a.numero = b.numero AND list_has_any(a.palavras, b.palavras)
+      AS mesma_porta
+  FROM candidatos a
+  JOIN candidatos b
+    ON a.source_id < b.source_id
+    AND abs(a.cy - b.cy) <= 1
+    AND abs(a.cx - b.cx) <= 1
+  WHERE 6371000 * 2 * asin(sqrt(
+      pow(sin(radians(b.latitude - a.latitude) / 2), 2)
+      + cos(radians(a.latitude)) * cos(radians(b.latitude))
+        * pow(sin(radians(b.longitude - a.longitude) / 2), 2)
+    )) < 30
+)
+SELECT id_a, id_b, marca_a, marca_b
+FROM perto
+WHERE pelo_nome OR ((marca_a OR marca_b) AND mesma_porta);
+
+-- Quem fica: o mais completo; no empate, o que tem o nome que o site do outro
+-- publica; depois, a confiança do Overture. O id desempata o resto, para duas
+-- cargas do mesmo release escolherem igual.
+CREATE TEMP TABLE posicao AS
+WITH com_marca AS (
+  SELECT id_a AS source_id FROM pares_dup WHERE marca_a
+  UNION
+  SELECT id_b FROM pares_dup WHERE marca_b
+)
+SELECT
+  c.source_id,
+  row_number() OVER (
+    ORDER BY
+      c.completude DESC,
+      (c.source_id IN (SELECT source_id FROM com_marca)) DESC,
+      c.confidence DESC NULLS LAST,
+      c.source_id
+  ) AS pos
+FROM candidatos c
+WHERE c.source_id IN (SELECT id_a FROM pares_dup UNION SELECT id_b FROM pares_dup);
+
+-- Cada duplicata aponta para o melhor dos seus pares...
+CREATE TEMP TABLE aponta AS
+SELECT perdedor, arg_min(vencedor, pos_vencedor) AS vencedor
+FROM (
+  SELECT
+    CASE WHEN pa.pos > pb.pos THEN p.id_a ELSE p.id_b END AS perdedor,
+    CASE WHEN pa.pos > pb.pos THEN p.id_b ELSE p.id_a END AS vencedor,
+    least(pa.pos, pb.pos) AS pos_vencedor
+  FROM pares_dup p
+  JOIN posicao pa ON pa.source_id = p.id_a
+  JOIN posicao pb ON pb.source_id = p.id_b
+)
+GROUP BY perdedor;
+
+-- ...e a cadeia é seguida até quem não é duplicata de ninguém. A posição só
+-- melhora a cada passo, então a cadeia sempre termina.
+CREATE TEMP TABLE duplicados AS
+WITH RECURSIVE cadeia(perdedor, vencedor) AS (
+  SELECT perdedor, vencedor FROM aponta
+  UNION
+  SELECT c.perdedor, a.vencedor
+  FROM cadeia c
+  JOIN aponta a ON a.perdedor = c.vencedor
+)
+SELECT perdedor AS source_id, vencedor AS duplicate_of
+FROM cadeia
+WHERE vencedor NOT IN (SELECT perdedor FROM aponta);
+
+-- O que ficou herda das duplicatas o campo que não tinha, da melhor para a
+-- pior: é o mesmo lugar, e o endereço de um completa o do outro.
+CREATE TEMP TABLE complemento AS
+SELECT
+  d.duplicate_of AS source_id,
+  arg_min(l.street, po.pos) FILTER (WHERE l.street IS NOT NULL) AS street,
+  arg_min(l.postcode, po.pos) FILTER (WHERE l.postcode IS NOT NULL) AS postcode,
+  arg_min(l.locality, po.pos) FILTER (WHERE l.locality IS NOT NULL) AS locality,
+  arg_min(l.region, po.pos) FILTER (WHERE l.region IS NOT NULL) AS region,
+  arg_min(l.neighborhood, po.pos) FILTER (WHERE l.neighborhood IS NOT NULL)
+    AS neighborhood,
+  arg_min(l.category, po.pos) FILTER (WHERE l.category IS NOT NULL) AS category
+FROM duplicados d
+JOIN lugares l ON l.source_id = d.source_id
+JOIN posicao po ON po.source_id = d.source_id
+GROUP BY d.duplicate_of;
+
+UPDATE lugares
+SET
+  street = coalesce(lugares.street, c.street),
+  postcode = coalesce(lugares.postcode, c.postcode),
+  locality = coalesce(lugares.locality, c.locality),
+  region = coalesce(lugares.region, c.region),
+  neighborhood = coalesce(lugares.neighborhood, c.neighborhood),
+  category = coalesce(lugares.category, c.category)
+FROM complemento c
+WHERE lugares.source_id = c.source_id;
+
+-- O que fechou e o que é duplicata não entram no CSV, e o import-places.mjs os
+-- oculta se já estavam no banco: o upsert sozinho só acrescenta e atualiza.
 COPY (
-  SELECT * FROM lugares WHERE source_id NOT IN (SELECT source_id FROM fechados)
+  SELECT
+    source_id, name, category, latitude, longitude,
+    neighborhood, street, postcode, locality, region
+  FROM lugares
+  WHERE source_id NOT IN (SELECT source_id FROM fechados)
+    AND source_id NOT IN (SELECT source_id FROM duplicados)
 ) TO '$CSV' (FORMAT CSV, HEADER);
 
 COPY (SELECT source_id FROM fechados) TO '$FECHADOS' (FORMAT CSV, HEADER);
+
+COPY (SELECT source_id, duplicate_of FROM duplicados)
+  TO '$DUPLICADOS' (FORMAT CSV, HEADER);
 SQL
 
 echo "      $(($(wc -l < "$CSV") - 1)) estabelecimentos, $(du -h "$CSV" | cut -f1)"
 echo "      $(($(wc -l < "$FECHADOS") - 1)) fechados, segundo o Foursquare"
+echo "      $(($(wc -l < "$DUPLICADOS") - 1)) duplicatas"
 echo "[2/2] Carregando no banco..."
 
 # `--env-file-if-exists` para a carga local achar o Postgres do `compose.yaml`
 # sem ninguém exportar nada. Em produção não atrapalha: variável já definida no
 # ambiente vence o arquivo.
+#
+# $PAIS_INTEIRO fica sem aspas de propósito: vazio, ele some da linha em vez de
+# virar um argumento vazio.
+# shellcheck disable=SC2086
 node --env-file-if-exists="$RAIZ/.env.development" \
-    "$RAIZ/infra/scripts/import-places.mjs" "$CSV" "$FECHADOS"
+    "$RAIZ/infra/scripts/import-places.mjs" "$CSV" \
+    --fechados="$FECHADOS" --duplicados="$DUPLICADOS" $PAIS_INTEIRO
 
 # Os lugares acrescentados à mão, que nenhuma fonte tem — ver
 # `import-manual-places.mjs`. A carga do Overture não os toca, porque tudo nela
