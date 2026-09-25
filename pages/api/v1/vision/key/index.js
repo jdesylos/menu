@@ -13,8 +13,8 @@ import { ForbiddenError, ServiceError } from "infra/errors.js";
 //
 // Por isso o que limita o estrago de um vazamento não está neste arquivo: é o
 // teto de gasto configurado na conta do provedor. Enquanto o plano for o
-// gratuito, o pior caso é alguém queimar a cota do dia, e o aplicativo cair no
-// OCR que roda no próprio aparelho.
+// gratuito, o pior caso é alguém queimar a cota do dia, e ninguém ler cardápio
+// até o dia virar: o aplicativo não tem mais leitura no aparelho.
 //
 // NÃO exige sessão, por decisão para os testes iniciais. O token estático
 // abaixo não é autenticação de usuário: é uma tranca contra varredura
