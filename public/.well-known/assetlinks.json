@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.menuspoiler.app",
+      "sha256_cert_fingerprints": [
+        "BF:7C:4E:58:8B:8A:13:12:BC:71:FA:79:AD:5D:B6:58:CB:23:2E:0E:0A:4F:36:57:BC:FB:44:BA:CC:01:7A:19"
+      ]
+    }
+  }
+]

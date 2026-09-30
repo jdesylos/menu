@@ -6,9 +6,11 @@ Este repositório **não tem interface**: ele existe apenas para expor o banco d
 através de uma **API REST** — contas, autenticação por sessão e ativação por e-mail.
 Qualquer front-end (site ou aplicativo) consome estes endpoints; nada de tela vive aqui.
 
+A única exceção é o link de ativação — ver [Ativação no aplicativo](#ativação-no-aplicativo).
+
 ## Stack
 
-- [Next.js](https://nextjs.org/) API Routes (somente `pages/api`)
+- [Next.js](https://nextjs.org/) API Routes (`pages/api`), mais a página do link de ativação
 - PostgreSQL — [Neon](https://neon.tech/) em produção, Docker em desenvolvimento
 - Migrations com [node-pg-migrate](https://github.com/salsita/node-pg-migrate)
 - Deploy na [Vercel](https://vercel.com/)
@@ -82,6 +84,8 @@ terminar.
 | `POST /api/v1/sessions`                | Login                              |
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
+| `GET /cadastro/ativar/[token]`         | Página do link, que só encaminha   |
+| `GET /.well-known/assetlinks.json`     | App Links do aplicativo Android    |
 | `GET /api/v1/migrations`               | Lista as migrations pendentes      |
 | `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
 | `GET /api/v1/tiles/[z]/[x]/[y]`        | Tile vetorial do mapa              |
@@ -99,6 +103,30 @@ O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After
 disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
+
+### Ativação no aplicativo
+
+O e-mail de cadastro leva a `https://menuspoiler.com.br/cadastro/ativar/<token>`, e quem
+ativa a conta é o **aplicativo**, com `PATCH /api/v1/activations/[token_id]`. No celular
+com o Menu Spoiler instalado, o sistema entrega o link direto a ele, e para isso o domínio
+declara o aplicativo:
+
+- `public/.well-known/assetlinks.json` — App Links do Android: o pacote e a impressão
+  digital SHA-256 do certificado que assina o APK. Hoje é a chave de desenvolvimento;
+  a da loja entra na mesma lista quando o aplicativo for publicado (no Google Play, a
+  do _App Signing_, que o Play Console mostra).
+- O arquivo equivalente do iOS (`apple-app-site-association`) ainda não existe: ele leva o
+  Team ID da conta Apple paga.
+
+O Android só confere o arquivo se ele vier do próprio domínio, em `https` e **sem
+redirecionamento** — o domínio principal na Vercel tem de ser `menuspoiler.com.br`, e não
+o `www`.
+
+A página `pages/cadastro/ativar/[token].js` é para quem abre o link em outro lugar — no
+computador, ou num celular sem o aplicativo. Ela explica onde abrir e, no Android, oferece
+abrir o aplicativo por `intent://`. **Ela nunca ativa a conta**: ativar pela web é o fluxo
+que se decidiu não ter, e um pré-visualizador de links que buscasse o endereço gastaria o
+token no lugar da pessoa.
 
 ### Tiles do mapa
 

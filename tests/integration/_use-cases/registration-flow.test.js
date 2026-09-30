@@ -63,6 +63,26 @@ describe("Use case: Registration Flow (all successful)", () => {
     expect(activationTokenObject.used_at).toBe(null);
   });
 
+  test("Open the link outside the app", async () => {
+    const pageResponse = await fetch(
+      `${webserver.origin}/cadastro/ativar/${activationTokenId}`,
+    );
+
+    expect(pageResponse.status).toBe(200);
+    expect(pageResponse.headers.get("content-type")).toContain("text/html");
+
+    const pageBody = await pageResponse.text();
+    expect(pageBody).toContain("Ative sua conta no aplicativo");
+
+    // Quem ativa é o aplicativo: abrir o link fora dele não gasta o token.
+    const activationTokenObject =
+      await activation.findOneValidById(activationTokenId);
+    expect(activationTokenObject.used_at).toBe(null);
+
+    const inactiveUser = await user.findOneByUsername("RegistrationFlow");
+    expect(inactiveUser.features).toEqual(["read:activation_token"]);
+  });
+
   test("Activate account", async () => {
     const activationResponse = await fetch(
       `${webserver.origin}/api/v1/activations/${activationTokenId}`,
