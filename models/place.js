@@ -199,6 +199,13 @@ function escapeLike(term) {
 // O que está oculto não entra — fechou, é duplicata de outro ou sumiu da
 // fonte; ver a migration "ocultar-places-em-vez-de-apagar". A busca aplica o
 // mesmo filtro.
+//
+// `has_menu` diz se alguém já mandou o cardápio do lugar. Viaja no tile pelo
+// mesmo motivo do endereço: o aplicativo pinta de outra cor o marcador de
+// quem tem cardápio, e o painel do lugar oferece vê-lo — perguntar por lugar
+// seria uma requisição por marcador. Como o tile fica uma hora na borda, o
+// cardápio recém-mandado pode levar esse tempo para mudar a cor no aparelho
+// dos outros; no de quem mandou, o próprio aplicativo marca na hora.
 async function findWithinTile(coordinates) {
   const { west, east, south, north } = tile.bounds(coordinates);
 
@@ -214,7 +221,15 @@ async function findWithinTile(coordinates) {
         neighborhood,
         locality,
         region,
-        postcode
+        postcode,
+        EXISTS (
+          SELECT
+            1
+          FROM
+            menus
+          WHERE
+            menus.place_id = places.id
+        ) AS has_menu
       FROM
         places
       WHERE
@@ -281,6 +296,7 @@ const place = {
   parseCoordinates,
   findWithinTile,
   parseSearch,
+  parseOrigin,
   search,
   findOneById,
   UUID_PATTERN,

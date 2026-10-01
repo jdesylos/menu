@@ -96,6 +96,10 @@ terminar.
 | `POST /api/v1/suggestions`             | Sugere um lugar ou uma mudança     |
 | `GET /api/v1/suggestions`              | As próprias sugestões, ou a fila   |
 | `PATCH /api/v1/suggestions/[id]`       | Aceita ou recusa uma sugestão      |
+| `POST /api/v1/menus`                   | Manda o cardápio de um lugar       |
+| `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
+| `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
+| `GET /api/v1/vision/key`               | Chave do provedor de visão         |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -224,6 +228,55 @@ A correção aceita vai para as colunas do lugar **e** para `places.overrides`, 
 do Overture reaplica por cima do que ela trouxer — sem isso, o release seguinte desfaria a
 correção.
 
+### Cardápios
+
+O aplicativo fotografa a folha, lê com um modelo de visão, a pessoa confere na tela de
+revisão, e só então o cardápio sobe — **já estruturado**. Aqui não se lê foto nem se extrai
+nada: confere-se a forma, e guarda-se.
+
+```json
+{
+  "place_id": "<uuid do lugar>",
+  "currency": "BRL",
+  "sections": [
+    {
+      "title": "Pratos",
+      "items": [
+        {
+          "name": "Virado à paulista",
+          "ingredients": "arroz, tutu, bisteca",
+          "price_cents": 4200
+        }
+      ]
+    }
+  ]
+}
+```
+
+- **Só o nome do prato é obrigatório.** Preço e ingredientes faltam o tempo todo em cardápio
+  de verdade, e o título da seção pode ser vazio.
+- **Dinheiro é inteiro**, em centavos (`price_cents`). Número quebrado volta `400`: é o preço
+  em reais mandado no lugar dos centavos.
+- **Cada envio é um cardápio novo.** O que vale para o lugar é o mais recente; os anteriores
+  ficam guardados, como registro de quem mandou o quê.
+- **Três tabelas** (`menus`, `menu_sections`, `menu_items`), e não um documento: o produto é
+  procurar prato e comparar preço entre lugares.
+
+Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é público, como o mapa.
+
+`GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
+(quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e
+`lon`, os mais próximos primeiro; sem eles, os mais recentes. São no máximo 50.
+
+E cada lugar do tile (`GET /api/v1/places/[z]/[x]/[y]`) traz `has_menu`: o aplicativo pinta
+de verde o marcador de quem tem cardápio. Como o tile fica uma hora na borda, o cardápio
+recém-mandado pode levar esse tempo para mudar a cor no aparelho dos outros.
+
+A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
+chave que `GET /api/v1/vision/key` entrega. Essa rota exige o token do
+aplicativo (`x-vision-token`).
+Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
+
 ## Deploy
 
 O banco fica na **Neon** e a API na **Vercel**. Em ambos, entre com **"Continue with
@@ -257,6 +310,8 @@ enxerga o repositório na hora de importar e cada push já vira um deploy.
 | `EMAIL_SMTP_USER`     | Provedor de e-mail transacional               |
 | `EMAIL_SMTP_PASSWORD` | Provedor de e-mail transacional               |
 | `PROTOMAPS_API_KEY`   | Protomaps — chave da API de tiles do mapa     |
+| `GEMINI_API_KEY`      | Provedor de visão — a chave que o app recebe  |
+| `VISION_TOKEN`        | Escolhido por você — a tranca da rota acima   |
 
 Em produção a conexão com o Postgres usa SSL automaticamente; `POSTGRES_CA` só é
 necessário se você quiser validar contra um certificado específico.
