@@ -6,11 +6,13 @@ Este repositório **não tem interface**: ele existe apenas para expor o banco d
 através de uma **API REST** — contas, autenticação por sessão e ativação por e-mail.
 Qualquer front-end (site ou aplicativo) consome estes endpoints; nada de tela vive aqui.
 
-A única exceção é o link de ativação — ver [Ativação no aplicativo](#ativação-no-aplicativo).
+As exceções são duas páginas: a home (`pages/index.js`), provisória, que diz a quem digita
+o domínio o que é o aplicativo, e a do link de ativação — ver
+[Ativação no aplicativo](#ativação-no-aplicativo).
 
 ## Stack
 
-- [Next.js](https://nextjs.org/) API Routes (`pages/api`), mais a página do link de ativação
+- [Next.js](https://nextjs.org/) API Routes (`pages/api`), mais a home e a página do link de ativação
 - PostgreSQL — [Neon](https://neon.tech/) em produção, Docker em desenvolvimento
 - Migrations com [node-pg-migrate](https://github.com/salsita/node-pg-migrate)
 - Deploy na [Vercel](https://vercel.com/)
@@ -74,7 +76,7 @@ terminar.
 
 | Endpoint                               | Descrição                          |
 | -------------------------------------- | ---------------------------------- |
-| `GET /`                                | Identifica a API                   |
+| `GET /`                                | Home provisória do aplicativo      |
 | `GET /status`                          | Atalho para o endpoint de status   |
 | `GET /api/v1/status`                   | Status do sistema e do banco       |
 | `POST /api/v1/users`                   | Cria uma conta                     |
