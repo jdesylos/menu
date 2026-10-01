@@ -83,10 +83,15 @@ terminar.
 | `GET /api/v1/users/[username]`         | Dados de outro usuário (sessão)    |
 | `PATCH /api/v1/users/[username]`       | Atualiza um usuário                |
 | `GET /api/v1/user`                     | Usuário da sessão atual            |
+| `DELETE /api/v1/user`                  | Apaga a conta da sessão atual      |
+| `PATCH /api/v1/user/password`          | Troca a senha da sessão atual      |
 | `POST /api/v1/sessions`                | Login                              |
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
 | `GET /cadastro/ativar/[token]`         | Página do link, que só encaminha   |
+| `POST /api/v1/recoveries`              | Pede o link de "esqueci a senha"   |
+| `PATCH /api/v1/recoveries/[token_id]`  | Grava a senha nova de quem abriu   |
+| `GET /senha/recuperar/[token]`         | Página do link, que só encaminha   |
 | `GET /.well-known/assetlinks.json`     | App Links do aplicativo Android    |
 | `GET /api/v1/migrations`               | Lista as migrations pendentes      |
 | `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
@@ -96,6 +101,10 @@ terminar.
 | `POST /api/v1/suggestions`             | Sugere um lugar ou uma mudança     |
 | `GET /api/v1/suggestions`              | As próprias sugestões, ou a fila   |
 | `PATCH /api/v1/suggestions/[id]`       | Aceita ou recusa uma sugestão      |
+| `POST /api/v1/menus`                   | Manda o cardápio de um lugar       |
+| `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
+| `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
+| `GET /api/v1/vision/key`               | Chave do provedor de visão         |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -105,6 +114,35 @@ O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After
 disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
+
+### Trocar a senha
+
+`PATCH /api/v1/user/password` `{ current_password, password }` troca a senha de quem está
+com a sessão. Pede a senha **atual**, e não só a sessão: quem pega um aparelho
+desbloqueado tem a sessão, e sem isso ficaria com a conta. A nova tem de 8 a 72
+caracteres (o teto é o do bcrypt, em bytes) e não pode ser a mesma.
+
+As **outras** sessões da conta são encerradas na mesma instrução; a que pediu continua.
+A senha atual errada responde `400`, e não `401` — para o aplicativo, `401` é sessão
+morta. O limite é o do login: cinco tentativas por IP a cada quinze minutos.
+
+A rota `PATCH /api/v1/users/[username]` continua trocando senha sem pedir a atual: ela
+serve a quem administra, e o aplicativo não a usa.
+
+### Apagar a conta
+
+`DELETE /api/v1/user` apaga a conta de quem está com a sessão — só a própria: quem é a
+conta sai da sessão, e não do endereço.
+
+Apagar é **esvaziar**, e não remover a linha. Nome de usuário, email e senha viram nulos (e
+ficam livres para outra pessoa usar), as features somem, as sessões e os links de ativação
+são apagados, e o IP sai dos registros de auditoria dela. Fica o `id`, com `deleted_at`.
+
+**Os cardápios e as sugestões que a conta mandou não são apagados.** O cardápio é do
+lugar, e não de quem o fotografou: ele continua valendo e continua aparecendo no
+aplicativo. Ele ainda aponta para a conta, que já não identifica ninguém — e é isso que
+permite limpar de uma vez o que uma mesma conta mandou. Os termos de uso do aplicativo
+dizem isso a quem apaga.
 
 ### Ativação no aplicativo
 
@@ -129,6 +167,35 @@ computador, ou num celular sem o aplicativo. Ela explica onde abrir e, no Androi
 abrir o aplicativo por `intent://`. **Ela nunca ativa a conta**: ativar pela web é o fluxo
 que se decidiu não ter, e um pré-visualizador de links que buscasse o endereço gastaria o
 token no lugar da pessoa.
+
+### Recuperação de senha
+
+Quem esqueceu a senha pede um link por e-mail, e escolhe a senha nova **no aplicativo** —
+o mesmo desenho da ativação.
+
+- `POST /api/v1/recoveries` `{ email }` manda o link, se houver conta com o e-mail. A
+  resposta é **a mesma** com e sem conta, para não revelar quem tem cadastro. Sem sessão
+  e sem feature; o que segura o abuso é o limite de cinco pedidos por IP a cada quinze
+  minutos.
+- O e-mail leva a `https://menuspoiler.com.br/senha/recuperar/<token>`, que o sistema
+  entrega ao aplicativo. A página `pages/senha/recuperar/[token].js` é para quem abre em
+  outro lugar, e **nunca troca a senha** — é a mesma peça da página de ativação
+  (`components/AbrirNoAplicativo.js`).
+- `PATCH /api/v1/recoveries/[token_id]` `{ password }` grava a senha nova. O token é a
+  credencial inteira: vale por quinze minutos e uma vez só. A senha segue a regra de 8 a
+  72 da troca de senha.
+
+Trocar por aqui gasta o link e os outros links pendentes da conta, e encerra **todas** as
+sessões dela — quem esqueceu a senha não está dentro, e quem recupera porque perdeu a
+conta para alguém quer esse alguém fora. Recuperar não ativa: a conta que nunca abriu o
+link de ativação troca a senha e continua sem poder entrar.
+
+Trocar a senha pelo caminho normal (`PATCH /api/v1/user/password`) também gasta os links
+pendentes, e apagar a conta os apaga.
+
+O que a rota de pedir não esconde: com conta, ela manda um e-mail antes de responder, e
+demora mais. E se o serviço de e-mail estiver fora, ela responde erro só para quem tem
+conta.
 
 ### Tiles do mapa
 
@@ -224,6 +291,55 @@ A correção aceita vai para as colunas do lugar **e** para `places.overrides`, 
 do Overture reaplica por cima do que ela trouxer — sem isso, o release seguinte desfaria a
 correção.
 
+### Cardápios
+
+O aplicativo fotografa a folha, lê com um modelo de visão, a pessoa confere na tela de
+revisão, e só então o cardápio sobe — **já estruturado**. Aqui não se lê foto nem se extrai
+nada: confere-se a forma, e guarda-se.
+
+```json
+{
+  "place_id": "<uuid do lugar>",
+  "currency": "BRL",
+  "sections": [
+    {
+      "title": "Pratos",
+      "items": [
+        {
+          "name": "Virado à paulista",
+          "ingredients": "arroz, tutu, bisteca",
+          "price_cents": 4200
+        }
+      ]
+    }
+  ]
+}
+```
+
+- **Só o nome do prato é obrigatório.** Preço e ingredientes faltam o tempo todo em cardápio
+  de verdade, e o título da seção pode ser vazio.
+- **Dinheiro é inteiro**, em centavos (`price_cents`). Número quebrado volta `400`: é o preço
+  em reais mandado no lugar dos centavos.
+- **Cada envio é um cardápio novo.** O que vale para o lugar é o mais recente; os anteriores
+  ficam guardados, como registro de quem mandou o quê.
+- **Três tabelas** (`menus`, `menu_sections`, `menu_items`), e não um documento: o produto é
+  procurar prato e comparar preço entre lugares.
+
+Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é público, como o mapa.
+
+`GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
+(quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e
+`lon`, os mais próximos primeiro; sem eles, os mais recentes. São no máximo 50.
+
+E cada lugar do tile (`GET /api/v1/places/[z]/[x]/[y]`) traz `has_menu`: o aplicativo pinta
+de verde o marcador de quem tem cardápio. Como o tile fica uma hora na borda, o cardápio
+recém-mandado pode levar esse tempo para mudar a cor no aparelho dos outros.
+
+A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
+chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma conta com
+`create:menu`**, além do token do aplicativo (`x-vision-token`) — sem conta, não há leitura.
+Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
+
 ## Deploy
 
 O banco fica na **Neon** e a API na **Vercel**. Em ambos, entre com **"Continue with
@@ -257,6 +373,8 @@ enxerga o repositório na hora de importar e cada push já vira um deploy.
 | `EMAIL_SMTP_USER`     | Provedor de e-mail transacional               |
 | `EMAIL_SMTP_PASSWORD` | Provedor de e-mail transacional               |
 | `PROTOMAPS_API_KEY`   | Protomaps — chave da API de tiles do mapa     |
+| `GEMINI_API_KEY`      | Provedor de visão — a chave que o app recebe  |
+| `VISION_TOKEN`        | Escolhido por você — a tranca da rota acima   |
 
 Em produção a conexão com o Postgres usa SSL automaticamente; `POSTGRES_CA` só é
 necessário se você quiser validar contra um certificado específico.

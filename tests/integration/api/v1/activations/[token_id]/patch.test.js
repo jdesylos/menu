@@ -143,6 +143,7 @@ describe("PATCH /api/v1/activations/[token_id]", () => {
         "update:user",
         "create:place",
         "update:place",
+        "create:menu",
       ]);
     });
 

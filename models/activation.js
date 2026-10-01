@@ -104,6 +104,7 @@ async function activateUserByUserId(userId) {
     "update:user",
     "create:place",
     "update:place",
+    "create:menu",
   ]);
   return activatedUser;
 }

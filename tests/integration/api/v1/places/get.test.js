@@ -90,6 +90,8 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
           locality: null,
           region: null,
           postcode: null,
+          // Ninguém mandou o cardápio deste lugar.
+          has_menu: false,
         },
       ]);
     });
@@ -132,7 +134,42 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
         locality: "São Paulo",
         region: "SP",
         postcode: "01327-000",
+        has_menu: false,
       });
+    });
+
+    // O aplicativo pinta de outra cor o marcador de quem tem cardápio, e os
+    // marcadores vêm daqui.
+    test("With a place that has a menu", async () => {
+      await createPlace({
+        sourceId: "com-cardapio",
+        name: "Bar com Cardápio no Tile",
+        category: "bar",
+        latitude: -23.5505,
+        longitude: -46.6333,
+      });
+      const created = await orchestrator.createUser();
+      const stored = await database.query({
+        text: "SELECT id FROM places WHERE source_id = 'com-cardapio';",
+      });
+      await database.query({
+        text: `
+          INSERT INTO menus (place_id, created_by, currency)
+          VALUES ($1, $2, 'BRL')
+        ;`,
+        values: [stored.rows[0].id, created.id],
+      });
+
+      const response = await fetch(
+        `${webserver.origin}/api/v1/places/${TILE_DA_SE}`,
+      );
+      const responseBody = await response.json();
+      const hasMenu = Object.fromEntries(
+        responseBody.places.map((place) => [place.name, place.has_menu]),
+      );
+
+      expect(hasMenu["Bar com Cardápio no Tile"]).toBe(true);
+      expect(hasMenu["Bar do Teste"]).toBe(false);
     });
 
     // O mapa não pode depender de quem está olhando: uma sessão vencida não

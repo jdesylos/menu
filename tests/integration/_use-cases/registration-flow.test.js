@@ -104,6 +104,7 @@ describe("Use case: Registration Flow (all successful)", () => {
       "update:user",
       "create:place",
       "update:place",
+      "create:menu",
     ]);
   });
 

@@ -1,4 +1,18 @@
 import rota from "pages/api/v1/vision/key/index.js";
+import session from "models/session.js";
+import user from "models/user.js";
+
+// A rota exige sessão, e quem a resolve é o banco. Aqui o banco não entra:
+// os dois modelos respondem o que cada teste disser, e o que se afirma é o que
+// a ROTA faz com a conta que recebeu.
+jest.mock("models/session.js", () => ({
+  __esModule: true,
+  default: { findOneValidByToken: jest.fn() },
+}));
+jest.mock("models/user.js", () => ({
+  __esModule: true,
+  default: { findOneById: jest.fn() },
+}));
 
 // Teste de UNIDADE, e não de integração como o resto das rotas: o que se
 // afirma aqui é o comportamento quando a variável de ambiente falta, e o
@@ -8,10 +22,19 @@ const ambiente = { ...process.env };
 
 afterEach(() => {
   process.env = { ...ambiente };
+  jest.resetAllMocks();
 });
 
-function pedido(headers = {}) {
-  return { method: "GET", url: "/api/v1/vision/key", headers };
+function pedido(headers = {}, cookies = {}) {
+  return { method: "GET", url: "/api/v1/vision/key", headers, cookies };
+}
+
+// Quem entrou, com as features dadas. O cookie só precisa existir: quem diz
+// de quem é a sessão são os modelos de mentira.
+function entrou(features) {
+  session.findOneValidByToken.mockResolvedValue({ user_id: "conta-de-teste" });
+  user.findOneById.mockResolvedValue({ id: "conta-de-teste", features });
+  return { session_id: "sessao-de-teste" };
 }
 
 function resposta() {
@@ -44,9 +67,12 @@ describe("GET /api/v1/vision/key", () => {
       process.env.VISION_TOKEN = "token-de-teste";
     });
 
-    test("entrega a chave a quem tem o token", async () => {
+    test("entrega a chave a quem tem o token e pode mandar cardápio", async () => {
       const r = resposta();
-      await rota(pedido({ "x-vision-token": "token-de-teste" }), r);
+      await rota(
+        pedido({ "x-vision-token": "token-de-teste" }, entrou(["create:menu"])),
+        r,
+      );
 
       expect(r.statusCode).toBe(200);
       expect(r.corpo).toEqual({ key: "chave-de-teste" });
@@ -69,6 +95,32 @@ describe("GET /api/v1/vision/key", () => {
       await rota(pedido({ "x-vision-token": "outro" }), r);
 
       expect(r.statusCode).toBe(403);
+    });
+
+    // O token sozinho é só o aplicativo aberto. A leitura é de quem entrou.
+    test("recusa quem tem o token mas não entrou", async () => {
+      const r = resposta();
+      await rota(pedido({ "x-vision-token": "token-de-teste" }), r);
+
+      expect(r.statusCode).toBe(403);
+      expect(r.corpo.action).toBe(
+        'Verifique se o seu usuário possui a feature "create:menu"',
+      );
+      expect(JSON.stringify(r.corpo)).not.toContain("chave-de-teste");
+    });
+
+    test("recusa a conta que não pode mandar cardápio", async () => {
+      const r = resposta();
+      await rota(
+        pedido(
+          { "x-vision-token": "token-de-teste" },
+          entrou(["read:activation_token"]),
+        ),
+        r,
+      );
+
+      expect(r.statusCode).toBe(403);
+      expect(JSON.stringify(r.corpo)).not.toContain("chave-de-teste");
     });
   });
 

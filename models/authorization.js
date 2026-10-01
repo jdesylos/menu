@@ -45,6 +45,15 @@ const availableFeatures = [
   // `validateFeature()` recusa nome desconhecido — como o `read:user` do
   // repositório judhagsan.
   "read:place_suggestion",
+
+  // MENU
+  // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota que
+  // entrega a chave do provedor de visão exige a mesma feature, porque quem
+  // não pode mandar não tem por que gastar a leitura. Toda conta ativada tem.
+  "create:menu",
+  // Chave de formatação do `filterOutput`, como a `read:place_suggestion`:
+  // ler o cardápio de um lugar é público, e nenhuma rota exige esta feature.
+  "read:menu",
 ];
 
 function can(user, feature, resource) {
@@ -139,6 +148,18 @@ function filterOutput(user, feature, resource) {
       reviewed_at: resource.reviewed_at,
       created_at: resource.created_at,
       updated_at: resource.updated_at,
+    };
+  }
+
+  // Quem mandou não sai: o cardápio é do lugar, e quem lê não tem por que
+  // saber de que conta ele veio.
+  if (feature === "read:menu") {
+    return {
+      id: resource.id,
+      place_id: resource.place_id,
+      currency: resource.currency,
+      sections: resource.sections,
+      created_at: resource.created_at,
     };
   }
 
