@@ -83,6 +83,7 @@ terminar.
 | `GET /api/v1/users/[username]`         | Dados de outro usuário (sessão)    |
 | `PATCH /api/v1/users/[username]`       | Atualiza um usuário                |
 | `GET /api/v1/user`                     | Usuário da sessão atual            |
+| `DELETE /api/v1/user`                  | Apaga a conta da sessão atual      |
 | `POST /api/v1/sessions`                | Login                              |
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
@@ -109,6 +110,21 @@ O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After
 disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
+
+### Apagar a conta
+
+`DELETE /api/v1/user` apaga a conta de quem está com a sessão — só a própria: quem é a
+conta sai da sessão, e não do endereço.
+
+Apagar é **esvaziar**, e não remover a linha. Nome de usuário, email e senha viram nulos (e
+ficam livres para outra pessoa usar), as features somem, as sessões e os links de ativação
+são apagados, e o IP sai dos registros de auditoria dela. Fica o `id`, com `deleted_at`.
+
+**Os cardápios e as sugestões que a conta mandou não são apagados.** O cardápio é do
+lugar, e não de quem o fotografou: ele continua valendo e continua aparecendo no
+aplicativo. Ele ainda aponta para a conta, que já não identifica ninguém — e é isso que
+permite limpar de uma vez o que uma mesma conta mandou. Os termos de uso do aplicativo
+dizem isso a quem apaga.
 
 ### Ativação no aplicativo
 
