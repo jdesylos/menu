@@ -47,7 +47,9 @@ const availableFeatures = [
   "read:place_suggestion",
 
   // MENU
-  // Mandar o cardápio de um lugar. Toda conta ativada tem.
+  // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota que
+  // entrega a chave do provedor de visão exige a mesma feature, porque quem
+  // não pode mandar não tem por que gastar a leitura. Toda conta ativada tem.
   "create:menu",
   // Chave de formatação do `filterOutput`, como a `read:place_suggestion`:
   // ler o cardápio de um lugar é público, e nenhuma rota exige esta feature.

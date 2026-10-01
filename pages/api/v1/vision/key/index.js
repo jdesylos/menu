@@ -1,5 +1,6 @@
 import { createRouter } from "next-connect";
 import controller from "infra/controller.js";
+import authorization from "models/authorization.js";
 import { ForbiddenError, ServiceError } from "infra/errors.js";
 
 // A chave do provedor de visão, entregue ao aplicativo.
@@ -16,12 +17,19 @@ import { ForbiddenError, ServiceError } from "infra/errors.js";
 // gratuito, o pior caso é alguém queimar a cota do dia, e ninguém ler cardápio
 // até o dia virar: o aplicativo não tem mais leitura no aparelho.
 //
-// NÃO exige sessão, por decisão para os testes iniciais. O token estático
-// abaixo não é autenticação de usuário: é uma tranca contra varredura
-// automática, que separa "qualquer um que descubra a URL" de "alguém que
-// abriu o aplicativo". Quando o app tiver login no fluxo de captura, esta rota
-// passa por `injectAnonymousOrUser` como as outras.
-export default createRouter().get(getHandler).handler(controller.errorHandlers);
+// Exige SESSÃO, de uma conta com `create:menu` — a mesma feature de mandar o
+// cardápio, porque ler a folha é o primeiro passo de mandá-la, e quem não pode
+// mandar não tem por que gastar a leitura. É o que dá um dono a cada chave
+// entregue: sem conta, qualquer um com o aplicativo lia de graça, e não havia
+// de quem tirar o acesso.
+//
+// O token estático abaixo continua, e não é autenticação de usuário: é uma
+// tranca contra varredura automática, que separa "qualquer um que descubra a
+// URL" de "alguém que abriu o aplicativo" — e é o interruptor da rota.
+export default createRouter()
+  .use(controller.injectAnonymousOrUser)
+  .get(getHandler)
+  .handler(controller.errorHandlers);
 
 async function getHandler(request, response) {
   const chave = process.env.GEMINI_API_KEY;
@@ -46,6 +54,16 @@ async function getHandler(request, response) {
     throw new ForbiddenError({
       message: "Token de leitura inválido.",
       action: "Use a versão do aplicativo publicada para este ambiente.",
+    });
+  }
+
+  // Depois do token, e não num `canRequest` antes do handler: ambiente sem a
+  // leitura configurada responde "não está ligada" a qualquer um, com ou sem
+  // conta, e é assim que a rota se desliga.
+  if (!authorization.can(request.context.user, "create:menu")) {
+    throw new ForbiddenError({
+      message: "Você não possui permissão para executar esta ação.",
+      action: 'Verifique se o seu usuário possui a feature "create:menu"',
     });
   }
 

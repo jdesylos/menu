@@ -273,8 +273,8 @@ de verde o marcador de quem tem cardápio. Como o tile fica uma hora na borda, o
 recém-mandado pode levar esse tempo para mudar a cor no aparelho dos outros.
 
 A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
-chave que `GET /api/v1/vision/key` entrega. Essa rota exige o token do
-aplicativo (`x-vision-token`).
+chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma conta com
+`create:menu`**, além do token do aplicativo (`x-vision-token`) — sem conta, não há leitura.
 Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
 
 ## Deploy
