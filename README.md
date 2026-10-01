@@ -89,6 +89,9 @@ terminar.
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
 | `GET /cadastro/ativar/[token]`         | Página do link, que só encaminha   |
+| `POST /api/v1/recoveries`              | Pede o link de "esqueci a senha"   |
+| `PATCH /api/v1/recoveries/[token_id]`  | Grava a senha nova de quem abriu   |
+| `GET /senha/recuperar/[token]`         | Página do link, que só encaminha   |
 | `GET /.well-known/assetlinks.json`     | App Links do aplicativo Android    |
 | `GET /api/v1/migrations`               | Lista as migrations pendentes      |
 | `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
@@ -164,6 +167,35 @@ computador, ou num celular sem o aplicativo. Ela explica onde abrir e, no Androi
 abrir o aplicativo por `intent://`. **Ela nunca ativa a conta**: ativar pela web é o fluxo
 que se decidiu não ter, e um pré-visualizador de links que buscasse o endereço gastaria o
 token no lugar da pessoa.
+
+### Recuperação de senha
+
+Quem esqueceu a senha pede um link por e-mail, e escolhe a senha nova **no aplicativo** —
+o mesmo desenho da ativação.
+
+- `POST /api/v1/recoveries` `{ email }` manda o link, se houver conta com o e-mail. A
+  resposta é **a mesma** com e sem conta, para não revelar quem tem cadastro. Sem sessão
+  e sem feature; o que segura o abuso é o limite de cinco pedidos por IP a cada quinze
+  minutos.
+- O e-mail leva a `https://menuspoiler.com.br/senha/recuperar/<token>`, que o sistema
+  entrega ao aplicativo. A página `pages/senha/recuperar/[token].js` é para quem abre em
+  outro lugar, e **nunca troca a senha** — é a mesma peça da página de ativação
+  (`components/AbrirNoAplicativo.js`).
+- `PATCH /api/v1/recoveries/[token_id]` `{ password }` grava a senha nova. O token é a
+  credencial inteira: vale por quinze minutos e uma vez só. A senha segue a regra de 8 a
+  72 da troca de senha.
+
+Trocar por aqui gasta o link e os outros links pendentes da conta, e encerra **todas** as
+sessões dela — quem esqueceu a senha não está dentro, e quem recupera porque perdeu a
+conta para alguém quer esse alguém fora. Recuperar não ativa: a conta que nunca abriu o
+link de ativação troca a senha e continua sem poder entrar.
+
+Trocar a senha pelo caminho normal (`PATCH /api/v1/user/password`) também gasta os links
+pendentes, e apagar a conta os apaga.
+
+O que a rota de pedir não esconde: com conta, ela manda um e-mail antes de responder, e
+demora mais. E se o serviço de e-mail estiver fora, ela responde erro só para quem tem
+conta.
 
 ### Tiles do mapa
 

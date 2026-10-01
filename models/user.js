@@ -283,7 +283,7 @@ async function addFeatures(userId, features) {
 //   outra pessoa usar);
 // - as features: a conta não pode mais nada;
 // - as sessões, apagadas — o aparelho que ainda guarda um token recebe 401;
-// - os links de ativação;
+// - os links de ativação, e os de recuperação de senha;
 // - o IP dos registros de auditoria dela: o registro do que aconteceu fica,
 //   sem o endereço de onde veio.
 //
@@ -317,6 +317,12 @@ async function erase(userId) {
       removed_activation_tokens AS (
         DELETE FROM
           user_activation_tokens
+        WHERE
+          user_id IN (SELECT id FROM erased)
+      ),
+      removed_recovery_tokens AS (
+        DELETE FROM
+          password_recovery_tokens
         WHERE
           user_id IN (SELECT id FROM erased)
       ),
@@ -354,6 +360,19 @@ async function erase(userId) {
 const PASSWORD_MIN_LENGTH = 8;
 const PASSWORD_MAX_BYTES = 72;
 
+function validateNewPassword(newPassword) {
+  if (
+    typeof newPassword !== "string" ||
+    newPassword.length < PASSWORD_MIN_LENGTH ||
+    Buffer.byteLength(newPassword, "utf8") > PASSWORD_MAX_BYTES
+  ) {
+    throw new ValidationError({
+      message: "A senha nova não é válida.",
+      action: `Escolha uma senha de ${PASSWORD_MIN_LENGTH} a ${PASSWORD_MAX_BYTES} caracteres.`,
+    });
+  }
+}
+
 // Troca a senha de quem a conhece.
 //
 // Pede a senha ATUAL, e não só a sessão: quem pega um aparelho desbloqueado
@@ -363,7 +382,9 @@ const PASSWORD_MAX_BYTES = 72;
 // As OUTRAS sessões da conta morrem junto, na mesma instrução: quem troca a
 // senha porque desconfia de alguém quer esse alguém fora. A sessão que pediu
 // continua — derrubá-la obrigaria a digitar de novo a senha que acabou de ser
-// digitada duas vezes.
+// digitada duas vezes. E os links de "esqueci a senha" que estivessem
+// pendentes deixam de valer: quem acabou de escolher a senha não esqueceu, e
+// um link desses solto num email ainda trocaria a senha de novo.
 async function changePassword({
   userId,
   currentPassword,
@@ -377,16 +398,7 @@ async function changePassword({
     });
   }
 
-  if (
-    typeof newPassword !== "string" ||
-    newPassword.length < PASSWORD_MIN_LENGTH ||
-    Buffer.byteLength(newPassword, "utf8") > PASSWORD_MAX_BYTES
-  ) {
-    throw new ValidationError({
-      message: "A senha nova não é válida.",
-      action: `Escolha uma senha de ${PASSWORD_MIN_LENGTH} a ${PASSWORD_MAX_BYTES} caracteres.`,
-    });
-  }
+  validateNewPassword(newPassword);
 
   const currentUser = await findOneById(userId);
 
@@ -434,6 +446,16 @@ async function changePassword({
           user_id IN (SELECT id FROM changed)
           AND token <> $3
           AND expires_at > NOW()
+      ),
+      spent_recovery_tokens AS (
+        UPDATE
+          password_recovery_tokens
+        SET
+          used_at = timezone('utc', now()),
+          updated_at = timezone('utc', now())
+        WHERE
+          user_id IN (SELECT id FROM changed)
+          AND used_at IS NULL
       )
       SELECT
         id,
@@ -463,6 +485,7 @@ const user = {
   setFeatures,
   addFeatures,
   changePassword,
+  validateNewPassword,
   erase,
 };
 
