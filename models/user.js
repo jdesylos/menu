@@ -348,6 +348,112 @@ async function erase(userId) {
   return results.rows[0];
 }
 
+// A senha de 8 a 72: o piso é o do padrão do repositório judhagsan, e o teto
+// é o do bcrypt, que ignora o que passar de 72 BYTES — aceitar mais seria
+// guardar uma senha diferente da que a pessoa digitou.
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_MAX_BYTES = 72;
+
+// Troca a senha de quem a conhece.
+//
+// Pede a senha ATUAL, e não só a sessão: quem pega um aparelho desbloqueado
+// tem a sessão, e sem esta conferência trocaria a senha e ficaria com a conta.
+// É o que separa esta troca da de `update`, que serve a quem administra.
+//
+// As OUTRAS sessões da conta morrem junto, na mesma instrução: quem troca a
+// senha porque desconfia de alguém quer esse alguém fora. A sessão que pediu
+// continua — derrubá-la obrigaria a digitar de novo a senha que acabou de ser
+// digitada duas vezes.
+async function changePassword({
+  userId,
+  currentPassword,
+  newPassword,
+  sessionToken,
+}) {
+  if (typeof currentPassword !== "string" || currentPassword.length === 0) {
+    throw new ValidationError({
+      message: "A senha atual não foi informada.",
+      action: "Digite a sua senha atual e tente de novo.",
+    });
+  }
+
+  if (
+    typeof newPassword !== "string" ||
+    newPassword.length < PASSWORD_MIN_LENGTH ||
+    Buffer.byteLength(newPassword, "utf8") > PASSWORD_MAX_BYTES
+  ) {
+    throw new ValidationError({
+      message: "A senha nova não é válida.",
+      action: `Escolha uma senha de ${PASSWORD_MIN_LENGTH} a ${PASSWORD_MAX_BYTES} caracteres.`,
+    });
+  }
+
+  const currentUser = await findOneById(userId);
+
+  // 400, e não 401: para o aplicativo, 401 é sessão morta — ele esqueceria a
+  // conta de quem só errou uma letra.
+  const matches = await password.compare(currentPassword, currentUser.password);
+  if (!matches) {
+    throw new ValidationError({
+      message: "A senha atual não confere.",
+      action: "Confira a senha atual e tente de novo.",
+    });
+  }
+
+  if (currentPassword === newPassword) {
+    throw new ValidationError({
+      message: "A senha nova é igual à atual.",
+      action: "Escolha uma senha diferente da atual.",
+    });
+  }
+
+  const hashedPassword = await password.hash(newPassword);
+
+  const results = await database.query({
+    text: `
+      WITH changed AS (
+        UPDATE
+          users
+        SET
+          password = $2,
+          updated_at = timezone('utc', now())
+        WHERE
+          id = $1
+          AND deleted_at IS NULL
+        RETURNING
+          id,
+          updated_at
+      ),
+      expired_sessions AS (
+        UPDATE
+          sessions
+        SET
+          expires_at = expires_at - interval '1 year',
+          updated_at = NOW()
+        WHERE
+          user_id IN (SELECT id FROM changed)
+          AND token <> $3
+          AND expires_at > NOW()
+      )
+      SELECT
+        id,
+        updated_at
+      FROM
+        changed
+    ;`,
+    values: [userId, hashedPassword, sessionToken],
+  });
+
+  if (results.rowCount === 0) {
+    throw new NotFoundError({
+      message: "A conta informada não foi encontrada.",
+      action: "Entre de novo e tente trocar a senha outra vez.",
+    });
+  }
+
+  return results.rows[0];
+}
+
 const user = {
   create,
   findOneById,
@@ -356,6 +462,7 @@ const user = {
   update,
   setFeatures,
   addFeatures,
+  changePassword,
   erase,
 };
 

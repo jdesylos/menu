@@ -84,6 +84,7 @@ terminar.
 | `PATCH /api/v1/users/[username]`       | Atualiza um usuário                |
 | `GET /api/v1/user`                     | Usuário da sessão atual            |
 | `DELETE /api/v1/user`                  | Apaga a conta da sessão atual      |
+| `PATCH /api/v1/user/password`          | Troca a senha da sessão atual      |
 | `POST /api/v1/sessions`                | Login                              |
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
@@ -110,6 +111,20 @@ O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After
 disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
+
+### Trocar a senha
+
+`PATCH /api/v1/user/password` `{ current_password, password }` troca a senha de quem está
+com a sessão. Pede a senha **atual**, e não só a sessão: quem pega um aparelho
+desbloqueado tem a sessão, e sem isso ficaria com a conta. A nova tem de 8 a 72
+caracteres (o teto é o do bcrypt, em bytes) e não pode ser a mesma.
+
+As **outras** sessões da conta são encerradas na mesma instrução; a que pediu continua.
+A senha atual errada responde `400`, e não `401` — para o aplicativo, `401` é sessão
+morta. O limite é o do login: cinco tentativas por IP a cada quinze minutos.
+
+A rota `PATCH /api/v1/users/[username]` continua trocando senha sem pedir a atual: ela
+serve a quem administra, e o aplicativo não a usa.
 
 ### Apagar a conta
 
