@@ -331,6 +331,18 @@ const MAX_PLACES = 50;
 //
 // A distância é a mesma conta da busca — ver `place.search` —, em graus e sem
 // raiz: só precisa ordenar. Sem origem, os mais recentes primeiro.
+//
+// A consulta parte de `menus`, e não de `places`. Partindo de `places`, o
+// banco procurava cardápio em CADA lugar do país — centenas de milhares de
+// linhas — para devolver os dois que tinham um: medido em produção, mais de um
+// segundo com o banco quente e 18,7 s com ele frio, mais que os 15 s que o
+// aplicativo espera. O `DISTINCT ON` fica com o cardápio mais recente de cada
+// lugar, pelo índice de `(place_id, created_at DESC)`, e o custo passa a ser
+// o número de cardápios.
+//
+// A contagem de pratos fica na lista de saída, fora do `DISTINCT ON`: assim
+// ela roda só para o cardápio que vale, e não para cada um que o lugar já
+// recebeu.
 async function findPlaces({ latitude, longitude }) {
   const hasOrigin = latitude !== null && longitude !== null;
 
@@ -359,34 +371,31 @@ async function findPlaces({ latitude, longitude }) {
         places.postcode,
         jsonb_build_object(
           'id', latest.id,
-          'items', latest.items,
+          'items', (
+            SELECT
+              count(*)::int
+            FROM
+              menu_items
+              INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
+            WHERE
+              menu_sections.menu_id = latest.id
+          ),
           'created_at', latest.created_at
         ) AS menu
       FROM
-        places
-        INNER JOIN LATERAL (
-          SELECT
+        (
+          SELECT DISTINCT ON (menus.place_id)
             menus.id,
-            menus.created_at,
-            (
-              SELECT
-                count(*)::int
-              FROM
-                menu_items
-                INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
-              WHERE
-                menu_sections.menu_id = menus.id
-            ) AS items
+            menus.place_id,
+            menus.created_at
           FROM
             menus
-          WHERE
-            menus.place_id = places.id
           ORDER BY
+            menus.place_id,
             menus.created_at DESC,
             menus.id DESC
-          LIMIT
-            1
-        ) AS latest ON true
+        ) AS latest
+        INNER JOIN places ON places.id = latest.place_id
       WHERE
         places.hidden_at IS NULL
       ORDER BY
