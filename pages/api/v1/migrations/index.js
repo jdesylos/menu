@@ -4,6 +4,7 @@ import migrator from "models/migrator.js";
 import authorization from "models/authorization.js";
 
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .get(controller.canRequest("read:migration"), getHandler)
   .post(controller.canRequest("create:migration"), postHandler)

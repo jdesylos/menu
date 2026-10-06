@@ -91,4 +91,112 @@ describe("models/tile.js", () => {
       }
     });
   });
+
+  describe(".dropUnusedLayers()", () => {
+    test("with layers the app does not draw", () => {
+      const roads = layer("roads", 40);
+      const buildings = layer("buildings", 300);
+      const body = Buffer.concat([
+        layer("pois", 200),
+        roads,
+        layer("places", 20),
+        buildings,
+      ]);
+
+      // O que fica sai byte a byte como entrou, e na mesma ordem.
+      expect(tile.dropUnusedLayers(body)).toEqual(
+        Buffer.concat([roads, buildings]),
+      );
+    });
+
+    test("with only layers the app draws", () => {
+      const body = Buffer.concat([layer("earth", 10), layer("water", 10)]);
+
+      // O mesmo buffer, sem cópia: não havia o que tirar.
+      expect(tile.dropUnusedLayers(body)).toBe(body);
+    });
+
+    test("with only layers the app does not draw", () => {
+      // Sobra um tile vazio, que a rota responde como 204.
+      expect(tile.dropUnusedLayers(layer("pois", 50))).toHaveLength(0);
+    });
+
+    test("with a layer whose name is not the first field", () => {
+      // O protobuf não promete ordem de campo: aqui a versão (campo 15) vem
+      // antes do nome.
+      const pois = field(
+        3,
+        Buffer.concat([varintField(15, 2), field(1, Buffer.from("pois"))]),
+      );
+      const roads = layer("roads", 40);
+
+      expect(tile.dropUnusedLayers(Buffer.concat([pois, roads]))).toEqual(
+        roads,
+      );
+    });
+
+    test("with a layer without a name", () => {
+      const body = field(3, varintField(15, 2));
+
+      expect(tile.dropUnusedLayers(body)).toBe(body);
+    });
+
+    test("with a tile cut in the middle", () => {
+      const whole = Buffer.concat([layer("pois", 200), layer("roads", 40)]);
+      const body = whole.subarray(0, whole.length - 5);
+
+      // Na dúvida o tile vai como veio: cortar mais seria pior.
+      expect(tile.dropUnusedLayers(body)).toBe(body);
+    });
+
+    test("with bytes that are not a tile", () => {
+      const body = Buffer.from("<html>login</html>");
+
+      expect(tile.dropUnusedLayers(body)).toBe(body);
+    });
+
+    test("with an empty tile", () => {
+      const body = Buffer.alloc(0);
+
+      expect(tile.dropUnusedLayers(body)).toBe(body);
+    });
+  });
 });
+
+// Um tile vetorial montado à mão, só com o que `dropUnusedLayers` lê: camadas
+// (campo 3) com nome (campo 1) e um recheio do tamanho pedido no lugar das
+// feições (campo 2).
+function layer(name, fillerLength) {
+  return field(
+    3,
+    Buffer.concat([
+      field(1, Buffer.from(name)),
+      field(2, Buffer.alloc(fillerLength, 0x2a)),
+      varintField(15, 2),
+    ]),
+  );
+}
+
+// Um campo de tamanho declarado (tipo 2): etiqueta, tamanho, conteúdo.
+function field(number, payload) {
+  return Buffer.concat([
+    varint(number * 8 + 2),
+    varint(payload.length),
+    payload,
+  ]);
+}
+
+// Um campo inteiro (tipo 0): etiqueta e valor.
+function varintField(number, value) {
+  return Buffer.concat([varint(number * 8), varint(value)]);
+}
+
+function varint(value) {
+  const bytes = [];
+  while (value >= 0x80) {
+    bytes.push((value % 0x80) + 0x80);
+    value = Math.floor(value / 0x80);
+  }
+  bytes.push(value);
+  return Buffer.from(bytes);
+}

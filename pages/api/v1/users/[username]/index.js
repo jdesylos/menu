@@ -5,6 +5,7 @@ import authorization from "models/authorization.js";
 import { ForbiddenError } from "infra/errors.js";
 
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   // Exige sessão: aberta, a rota respondia 200 para quem existe e 404 para quem
   // não existe, o que basta para levantar a lista de cadastrados. Nenhum

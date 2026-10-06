@@ -9,6 +9,7 @@ import auditLog from "models/auditLog.js";
 // segura o abuso é o limite por IP: sem ele, a rota manda email a quem
 // quiserem, quantas vezes quiserem.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .post(
     controller.rateLimit({

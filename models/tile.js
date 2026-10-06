@@ -113,6 +113,150 @@ function tileRowToLatitude(row, gridSize) {
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
+// As camadas do basemap que o aplicativo NÃO desenha, e que por isso não
+// viajam.
+//
+// `pois` são os pontos do OpenStreetMap — restaurantes inclusive —, que o mapa
+// do aplicativo ignora de propósito: os lugares de comer vêm do banco, pela
+// rota `/places`. `places` são os nomes de bairro e de cidade, que ele também
+// não escreve. Medido no tile de z15 da Praça da Sé: 228 KB ao todo, 41 KB de
+// `pois` e 1 KB de `places` — quase um quinto do tile, baixado em rede móvel
+// para ser jogado fora.
+//
+// É a lista do que SAI, e não do que fica: camada nova que a Protomaps
+// publique continua passando, e o aplicativo decide o que faz com ela. Uma
+// lista do que fica obrigaria a mexer aqui antes de o aplicativo poder
+// desenhar qualquer coisa nova.
+const UNUSED_LAYERS = ["pois", "places"];
+
+// No protobuf, cada campo começa por uma etiqueta: o número do campo e, nos
+// três bits de baixo, como o valor está escrito.
+const WIRE_VARINT = 0;
+const WIRE_FIXED64 = 1;
+const WIRE_LENGTH_DELIMITED = 2;
+const WIRE_FIXED32 = 5;
+
+// No tile vetorial, as camadas são o campo 3 da mensagem, e o nome de cada
+// uma é o campo 1 da camada.
+const TILE_LAYERS_FIELD = 3;
+const LAYER_NAME_FIELD = 1;
+
+// Tira do tile as camadas de `UNUSED_LAYERS`, sem decodificar a geometria.
+//
+// Um tile vetorial é uma mensagem protobuf cujo primeiro nível é uma sequência
+// de camadas, e cada camada traz o próprio nome. Basta andar por esse primeiro
+// nível e copiar, byte a byte, as camadas que ficam: nenhuma dependência nova,
+// e nada do que o aplicativo lê é reescrito.
+//
+// Qualquer coisa fora do esperado devolve o tile COMO VEIO. Mandar um tile
+// maior do que precisava é desperdício; mandar um tile cortado no meio é o
+// mapa sem desenhar.
+function dropUnusedLayers(body) {
+  const kept = [];
+  let droppedAny = false;
+
+  try {
+    let offset = 0;
+    while (offset < body.length) {
+      const field = readField(body, offset);
+
+      const isUnusedLayer =
+        field.number === TILE_LAYERS_FIELD &&
+        field.wireType === WIRE_LENGTH_DELIMITED &&
+        UNUSED_LAYERS.includes(readLayerName(body, field.start, field.end));
+
+      if (isUnusedLayer) {
+        droppedAny = true;
+      } else {
+        kept.push(body.subarray(offset, field.end));
+      }
+
+      offset = field.end;
+    }
+  } catch {
+    return body;
+  }
+
+  return droppedAny ? Buffer.concat(kept) : body;
+}
+
+// O nome de uma camada, que ocupa `buffer[start..end]`. Sem nome, `null` — e
+// a camada fica: só sai o que se sabe que não serve.
+function readLayerName(buffer, start, end) {
+  let offset = start;
+  while (offset < end) {
+    const field = readField(buffer, offset, end);
+
+    if (
+      field.number === LAYER_NAME_FIELD &&
+      field.wireType === WIRE_LENGTH_DELIMITED
+    ) {
+      return buffer.toString("utf8", field.start, field.end);
+    }
+
+    offset = field.end;
+  }
+
+  return null;
+}
+
+// Um campo protobuf a partir de `offset`: o número, o tipo, e onde o valor
+// começa e termina. Lança diante de qualquer coisa que não caiba em `limit` —
+// quem chama trata como tile que não se sabe ler.
+function readField(buffer, offset, limit = buffer.length) {
+  const tag = readVarint(buffer, offset, limit);
+  // Divisão, e não deslocamento de bits: o deslocamento do JavaScript trunca
+  // em 32 bits, e a etiqueta é um inteiro de até 64.
+  const number = Math.floor(tag.value / 8);
+  const wireType = tag.value % 8;
+
+  let start = tag.end;
+  let end;
+
+  if (wireType === WIRE_VARINT) {
+    end = readVarint(buffer, start, limit).end;
+  } else if (wireType === WIRE_FIXED64) {
+    end = start + 8;
+  } else if (wireType === WIRE_FIXED32) {
+    end = start + 4;
+  } else if (wireType === WIRE_LENGTH_DELIMITED) {
+    const length = readVarint(buffer, start, limit);
+    start = length.end;
+    end = start + length.value;
+  } else {
+    throw new RangeError(`Tipo de campo desconhecido: ${wireType}.`);
+  }
+
+  if (end > limit) {
+    throw new RangeError("O campo passa do fim da mensagem.");
+  }
+
+  return { number, wireType, start, end };
+}
+
+// Um inteiro de tamanho variável: sete bits por byte, do menos significativo
+// para o mais, e o bit de cima dizendo se há mais um byte.
+function readVarint(buffer, offset, limit) {
+  // Dez bytes guardam 64 bits; mais que isso não é um inteiro.
+  const MAX_BYTES = 10;
+
+  let value = 0;
+  for (let index = 0; index < MAX_BYTES; index++) {
+    if (offset + index >= limit) {
+      break;
+    }
+
+    const byte = buffer[offset + index];
+    value += (byte & 0x7f) * 2 ** (7 * index);
+
+    if (byte < 0x80) {
+      return { value, end: offset + index + 1 };
+    }
+  }
+
+  throw new RangeError("Inteiro sem fim na mensagem.");
+}
+
 async function fetchVectorTile({ zoom, column, row }) {
   const apiKey = process.env.PROTOMAPS_API_KEY;
 
@@ -162,6 +306,7 @@ const tile = {
   isWithinServedArea,
   bounds,
   fetchVectorTile,
+  dropUnusedLayers,
 };
 
 export default tile;

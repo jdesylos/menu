@@ -1,4 +1,5 @@
 import * as cookie from "cookie";
+import database from "infra/database.js";
 import session from "models/session.js";
 import user from "models/user.js";
 import authorization from "models/authorization.js";
@@ -70,6 +71,17 @@ function clearSessionCookie(response) {
   });
 
   response.setHeader("Set-Cookie", setCookie);
+}
+
+// Uma conexão com o banco para a requisição inteira, em vez de uma por
+// consulta — o porquê e o que foi medido estão em `database.withSharedClient`.
+//
+// Vem ANTES de `injectAnonymousOrUser` nas rotas: achar a sessão e a conta já
+// são duas consultas, e é delas em diante que a conexão é dividida. As rotas
+// do mapa, que fazem uma consulta só ou nenhuma, não passam por aqui — não
+// teriam o que dividir.
+async function shareDatabaseConnection(request, response, next) {
+  return await database.withSharedClient(next);
 }
 
 async function injectAnonymousOrUser(request, response, next) {
@@ -166,6 +178,7 @@ const controller = {
   },
   setSessionCookie,
   clearSessionCookie,
+  shareDatabaseConnection,
   injectAnonymousOrUser,
   canRequest,
   rateLimit,

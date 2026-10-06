@@ -11,6 +11,7 @@ import { ForbiddenError, UnauthorizedError } from "infra/errors.js";
 // judhagsan. Sem isto, a rota respondia a qualquer ritmo, e adivinhar senha
 // era questão de paciência.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .post(
     controller.rateLimit({

@@ -27,6 +27,7 @@ import { ForbiddenError, ServiceError } from "infra/errors.js";
 // tranca contra varredura automática, que separa "qualquer um que descubra a
 // URL" de "alguém que abriu o aplicativo" — e é o interruptor da rota.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .get(getHandler)
   .handler(controller.errorHandlers);
