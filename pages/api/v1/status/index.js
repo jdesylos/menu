@@ -4,6 +4,7 @@ import controller from "infra/controller.js";
 import authorization from "models/authorization.js";
 
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .get(getHandler)
   .handler(controller.errorHandlers);

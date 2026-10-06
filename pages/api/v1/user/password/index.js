@@ -13,6 +13,7 @@ import { ValidationError } from "infra/errors.js";
 // O limite é o do login, e pelo mesmo motivo: com uma sessão na mão, esta rota
 // também responde se uma senha confere.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .patch(
     controller.rateLimit({

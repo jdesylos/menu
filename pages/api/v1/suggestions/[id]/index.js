@@ -6,6 +6,7 @@ import placeSuggestion from "models/placeSuggestion.js";
 // Aceitar ou recusar uma sugestão — o que muda o mapa de todo mundo, e por
 // isso exige `manage:place`, e não `admin`: ver `models/authorization.js`.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .patch(controller.canRequest("manage:place"), patchHandler)
   .handler(controller.errorHandlers);

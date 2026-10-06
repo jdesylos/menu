@@ -12,6 +12,7 @@ import menu from "models/menu.js";
 // Ler é público, como o mapa: saber o prato e o preço antes de chegar é o
 // produto, e não pede conta. Mandar pede `create:menu`.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .post(controller.canRequest("create:menu"), postHandler)
   .get(getHandler)

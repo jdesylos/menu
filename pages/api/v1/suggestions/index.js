@@ -12,6 +12,7 @@ import placeSuggestion from "models/placeSuggestion.js";
 // `create:place`, o resto `update:place` — e o tipo só se sabe pelo corpo. A
 // conferência acontece em `placeSuggestion.create`, com o mesmo 403.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .post(postHandler)
   .get(controller.canRequest("read:session"), getHandler)

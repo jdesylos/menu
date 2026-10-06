@@ -9,6 +9,7 @@ import auditLog from "models/auditLog.js";
 // limite por IP é folga, e não a tranca — o token é um UUID aleatório, que
 // não se adivinha.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .patch(
     controller.rateLimit({

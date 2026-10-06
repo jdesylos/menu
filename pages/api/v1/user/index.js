@@ -10,6 +10,7 @@ import authorization from "models/authorization.js";
 // `/users/[username]`: quem é a conta sai da sessão, e não do endereço — não
 // há como pedir para apagar a de outra pessoa trocando um nome na URL.
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .get(controller.canRequest("read:session"), getHandler)
   .delete(controller.canRequest("read:session"), deleteHandler)

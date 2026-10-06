@@ -4,6 +4,7 @@ import activation from "models/activation.js";
 import authorization from "models/authorization.js";
 
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .patch(controller.canRequest("read:activation_token"), patchHandler)
   .handler(controller.errorHandlers);

@@ -5,6 +5,7 @@ import activation from "models/activation.js";
 import authorization from "models/authorization.js";
 
 export default createRouter()
+  .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
   .post(controller.canRequest("create:user"), postHandler)
   .handler(controller.errorHandlers);
