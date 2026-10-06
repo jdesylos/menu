@@ -211,6 +211,12 @@ Os tiles são recortados para o Brasil a partir do zoom 6 — tile fora da área
 sem gastar cota. O `Cache-Control` guarda um dia no aparelho e trinta no CDN, então o
 mesmo tile pedido por muita gente bate uma vez só na Protomaps.
 
+O tile não sai como a Protomaps o entrega. As camadas que o aplicativo não desenha
+(`pois` e `places`) são tiradas, e a resposta vai em **gzip** para quem manda
+`Accept-Encoding: gzip` — a borda da Vercel não comprime este tipo de conteúdo sozinha.
+Medido em tiles de z15 de São Paulo, o que desce cai pela metade ou mais (228 KB → 93 KB
+na Praça da Sé), e em rede móvel o tile é o que mais pesa numa tela de mapa.
+
 O dado é da OpenStreetMap sob **ODbL**, que exige atribuição visível: quem desenha o mapa
 precisa mostrar `© OpenStreetMap` na tela.
 

@@ -1,6 +1,10 @@
+import { promisify } from "node:util";
+import zlib from "node:zlib";
 import { createRouter } from "next-connect";
 import controller from "infra/controller.js";
 import tile from "models/tile.js";
+
+const gzip = promisify(zlib.gzip);
 
 // Proxy do basemap vetorial da Protomaps.
 //
@@ -34,15 +38,25 @@ async function getHandler(request, response) {
   // desenha nada e segue. Devolver 4xx faria o mapa piscar erro na borda do
   // recorte, que é comportamento normal e não falha.
   if (!tile.isWithinServedArea(coordinates)) {
-    return sendTile(response, Buffer.alloc(0));
+    return sendTile(request, response, Buffer.alloc(0));
   }
 
   const { body } = await tile.fetchVectorTile(coordinates);
 
-  return sendTile(response, body);
+  // O que o aplicativo não desenha não viaja — ver `tile.dropUnusedLayers`.
+  return sendTile(request, response, tile.dropUnusedLayers(body));
 }
 
-function sendTile(response, body) {
+// O tile vai comprimido para quem aceita.
+//
+// A borda da Vercel comprime JSON sozinha, mas não este tipo de conteúdo:
+// medido em produção, o tile de z15 da Praça da Sé descia com os 228 KB
+// inteiros, e o gzip o leva a metade disso. Em rede móvel o tile é o que mais
+// pesa numa tela de mapa, e é a demora que se vê — o mapa preto esperando.
+//
+// Quem não manda `Accept-Encoding: gzip` recebe como antes, e o `Vary` diz à
+// borda que são duas respostas diferentes para o mesmo endereço.
+async function sendTile(request, response, body) {
   response.setHeader("Content-Type", VECTOR_TILE_CONTENT_TYPE);
   response.setHeader("Cache-Control", CACHE_CONTROL);
 
@@ -52,5 +66,32 @@ function sendTile(response, body) {
     return response.status(204).end();
   }
 
-  return response.status(200).send(body);
+  response.setHeader("Vary", "Accept-Encoding");
+
+  if (!acceptsGzip(request.headers["accept-encoding"])) {
+    return response.status(200).send(body);
+  }
+
+  response.setHeader("Content-Encoding", "gzip");
+  return response.status(200).send(await gzip(body));
+}
+
+// Se o cabeçalho `Accept-Encoding` aceita gzip: citado, e sem `q=0` — que é
+// como se diz "este não".
+function acceptsGzip(header) {
+  if (typeof header !== "string") {
+    return false;
+  }
+
+  return header.split(",").some((entry) => {
+    const [coding, ...parameters] = entry
+      .split(";")
+      .map((part) => part.trim().toLowerCase());
+
+    const refused = parameters.some((parameter) =>
+      /^q=0(\.0*)?$/.test(parameter),
+    );
+
+    return coding === "gzip" && !refused;
+  });
 }
