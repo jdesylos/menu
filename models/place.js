@@ -203,9 +203,8 @@ function escapeLike(term) {
 // `has_menu` diz se alguém já mandou o cardápio do lugar. Viaja no tile pelo
 // mesmo motivo do endereço: o aplicativo pinta de outra cor o marcador de
 // quem tem cardápio, e o painel do lugar oferece vê-lo — perguntar por lugar
-// seria uma requisição por marcador. Como o tile fica uma hora na borda, o
-// cardápio recém-mandado pode levar esse tempo para mudar a cor no aparelho
-// dos outros; no de quem mandou, o próprio aplicativo marca na hora.
+// seria uma requisição por marcador. O tile fica uma hora na borda, e por isso
+// guardar um cardápio apaga de lá os tiles do lugar — ver `cacheTagsOf`.
 async function findWithinTile(coordinates) {
   const { west, east, south, north } = tile.bounds(coordinates);
 
@@ -245,6 +244,27 @@ async function findWithinTile(coordinates) {
   });
 
   return results.rows;
+}
+
+// O nome pelo qual a borda da Vercel guarda a resposta de um tile de lugares,
+// para que ela possa ser apagada de lá antes do prazo — ver `infra/cdn.js`.
+//
+// Por TILE, e não por lugar: um tile traz até `MAX_PLACES_PER_TILE` lugares, e
+// a borda aceita 128 etiquetas por resposta.
+function cacheTag({ zoom, column, row }) {
+  return `places-${zoom}-${column}-${row}`;
+}
+
+// As etiquetas de todos os tiles em que um lugar viaja: um por zoom que a rota
+// aceita. O aplicativo pede os lugares em z16 com o mapa afastado e no zoom do
+// próprio tile de perto, e cada um deles é uma resposta à parte na borda — com
+// o seu prazo.
+function cacheTagsOf({ latitude, longitude }) {
+  const tags = [];
+  for (let zoom = MIN_ZOOM; zoom <= MAX_ZOOM; zoom++) {
+    tags.push(cacheTag(tile.containing({ latitude, longitude }, zoom)));
+  }
+  return tags;
 }
 
 // Um lugar pelo id, visível ou não — quem chama decide o que fazer com o
@@ -295,6 +315,8 @@ const place = {
   MAX_SEARCH_RESULTS,
   parseCoordinates,
   findWithinTile,
+  cacheTag,
+  cacheTagsOf,
   parseSearch,
   parseOrigin,
   search,

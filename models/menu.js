@@ -1,4 +1,5 @@
 import database from "infra/database.js";
+import cdn from "infra/cdn.js";
 import place from "models/place.js";
 import { NotFoundError, ValidationError } from "infra/errors.js";
 
@@ -79,13 +80,23 @@ async function create(user, input) {
         new_menu
     ;`,
     values: [
-      values.placeId,
+      values.place.id,
       user.id,
       values.currency,
       JSON.stringify(values.sections),
       JSON.stringify(values.items),
     ],
   });
+
+  // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
+  // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio
+  // seguia sem cor no mapa — com o lugar já na lista de cardápios, que não
+  // passa pela borda.
+  //
+  // A cada cardápio, e não só no primeiro do lugar, que é o único que muda o
+  // `has_menu`: saber qual é o primeiro pediria mais uma consulta, para poupar
+  // a borda de refazer cinco respostas pequenas.
+  cdn.forget(place.cacheTagsOf(values.place));
 
   return await findOneById(result.rows[0].id);
 }
@@ -176,7 +187,7 @@ async function parseInput(input) {
   // volta 400 sem gastar a consulta.
   const target = await findVisiblePlace(input.place_id);
 
-  return { placeId: target.id, currency: input.currency, sections, items };
+  return { place: target, currency: input.currency, sections, items };
 }
 
 function parseItem(item) {

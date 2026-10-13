@@ -77,6 +77,58 @@ describe("models/tile.js", () => {
     });
   });
 
+  describe(".containing()", () => {
+    // O Food Storm de Camburi, o caso que pediu esta conta: em produção, é o
+    // tile 16/24457/37226 que o traz.
+    const FOOD_STORM = { latitude: -23.77546, longitude: -45.64963 };
+    // A Praça da Sé, no tile que os testes de integração usam.
+    const PRACA_DA_SE = { latitude: -23.5505, longitude: -46.6333 };
+
+    test("with a point whose tile is known", () => {
+      expect(tile.containing(FOOD_STORM, 16)).toEqual({
+        zoom: 16,
+        column: 24457,
+        row: 37226,
+      });
+      expect(tile.containing(PRACA_DA_SE, 16)).toEqual({
+        zoom: 16,
+        column: 24278,
+        row: 37181,
+      });
+    });
+
+    // É o que importa de verdade: o tile devolvido é um que `bounds` — e por
+    // ela a consulta dos lugares — diz que cobre o ponto.
+    test("with every zoom the places route accepts", () => {
+      for (const point of [FOOD_STORM, PRACA_DA_SE]) {
+        for (let zoom = 14; zoom <= 18; zoom++) {
+          const { west, east, south, north } = tile.bounds(
+            tile.containing(point, zoom),
+          );
+
+          expect(point.longitude).toBeGreaterThanOrEqual(west);
+          expect(point.longitude).toBeLessThan(east);
+          expect(point.latitude).toBeGreaterThan(south);
+          expect(point.latitude).toBeLessThanOrEqual(north);
+        }
+      }
+    });
+
+    test("with a point at the edge of the world", () => {
+      // No zoom 2 a grade é 4x4: nada pode cair na coluna ou na linha 4.
+      expect(tile.containing({ latitude: -89.9, longitude: 180 }, 2)).toEqual({
+        zoom: 2,
+        column: 3,
+        row: 3,
+      });
+      expect(tile.containing({ latitude: 89.9, longitude: -180 }, 2)).toEqual({
+        zoom: 2,
+        column: 0,
+        row: 0,
+      });
+    });
+  });
+
   describe(".fetchVectorTile()", () => {
     test("without PROTOMAPS_API_KEY configured", async () => {
       const originalKey = process.env.PROTOMAPS_API_KEY;

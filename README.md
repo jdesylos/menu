@@ -338,8 +338,11 @@ Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é públic
 `lon`, os mais próximos primeiro; sem eles, os mais recentes. São no máximo 50.
 
 E cada lugar do tile (`GET /api/v1/places/[z]/[x]/[y]`) traz `has_menu`: o aplicativo pinta
-de verde o marcador de quem tem cardápio. Como o tile fica uma hora na borda, o cardápio
-recém-mandado pode levar esse tempo para mudar a cor no aparelho dos outros.
+de verde o marcador de quem tem cardápio. O tile fica uma hora na borda, e por isso guardar
+um cardápio **apaga de lá os tiles do lugar**, de z14 a z18: a resposta do tile leva a
+etiqueta dele no cabeçalho `Vercel-Cache-Tag`, e `menu.create` pede a purga por
+`infra/cdn.js`. Sem isso o lugar aparecia na lista de cardápios, que não passa pela borda, e
+seguia sem cor no mapa. Fora da Vercel não há borda, e a purga não faz nada.
 
 A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
 chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma conta com
