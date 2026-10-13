@@ -11,5 +11,18 @@
     "region": "SP",
     "postcode": "05503-000",
     "fonte": "CNPJ 62.296.925/0001 nos dados abertos da Receita (2026-09): 'RESTAURANTE TIA LUORDES', assim mesmo, ativo desde 19/08/2025, na Av. Vital Brasil, 1250, loja 5B. O nome é o do perfil do próprio restaurante (@restaurantetialourdesoficial). Não estava no Overture 2026-09-23.0 nem no OpenStreetMap. O ponto é o do prédio, entre a Drogaria São Paulo e o Sukiya, e não o da porta."
+  },
+  {
+    "id": "food-storm-camburi",
+    "name": "Food Storm",
+    "category": "restaurant",
+    "latitude": -23.77546,
+    "longitude": -45.64963,
+    "street": "Al. Antonio José Marques, 734",
+    "neighborhood": "Camburi",
+    "locality": "São Sebastião",
+    "region": "SP",
+    "postcode": "11619-434",
+    "fonte": "Perfil do próprio restaurante no Instagram (@foodstorm012) e no Linktree (linktr.ee/foodstorm), que o põem na Praia de Camburi/Camburizinho, em São Sebastião-SP, com kebabs, petiscos e porções. O endereço — Al. Antonio José Marques, 734, CEP 11619-434 — é o que o restaurante divulga, passado por quem mantém o projeto em 13/10/2026. Não estava na carga do Overture em produção nesse dia: a busca por 'food storm' voltava vazia, com 73 lugares no banco num raio de 2 km. O ponto é ESTIMADO, e não o da porta: é o do vizinho de numeração que o banco tem, o Ramil Culinária Árabe (nº 744), deslocado uns dez metros; o centro do CEP 11619-434 no OpenStreetMap fica a 50 m dali. O bairro é Camburi, como nos Correios — o Overture grava 'Maresias', o distrito, em todos os vizinhos."
   }
 ]
