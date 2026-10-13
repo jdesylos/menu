@@ -59,4 +59,47 @@ describe("models/place.js", () => {
       }).toThrow(ValidationError);
     });
   });
+
+  describe(".cacheTag()", () => {
+    test("with the coordinates of a tile", () => {
+      expect(place.cacheTag({ zoom: 16, column: 24457, row: 37226 })).toBe(
+        "places-16-24457-37226",
+      );
+    });
+  });
+
+  describe(".cacheTagsOf()", () => {
+    // Um tile por zoom que a rota aceita, e nenhum a mais: o que ficar de
+    // fora segue na borda com o dado velho.
+    test("with a place", () => {
+      // O Food Storm de Camburi.
+      const tags = place.cacheTagsOf({
+        latitude: -23.77546,
+        longitude: -45.64963,
+      });
+
+      expect(tags).toEqual([
+        "places-14-6114-9306",
+        "places-15-12228-18613",
+        "places-16-24457-37226",
+        "places-17-48915-74452",
+        "places-18-97830-148904",
+      ]);
+    });
+
+    // As duas contas têm de dar o mesmo nome ao mesmo tile: a etiqueta que a
+    // rota escreve é a que o cardápio novo apaga.
+    test("with the tile the route would tag", () => {
+      const coordinates = place.parseCoordinates({
+        z: "16",
+        x: "24278",
+        y: "37181",
+      });
+
+      // A Praça da Sé, que fica nesse tile.
+      expect(
+        place.cacheTagsOf({ latitude: -23.5505, longitude: -46.6333 }),
+      ).toContain(place.cacheTag(coordinates));
+    });
+  });
 });

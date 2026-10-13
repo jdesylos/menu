@@ -181,6 +181,11 @@ describe("GET /api/v1/places/[z]/[x]/[y]", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("cache-control")).toContain("s-maxage");
+      // A etiqueta do tile: é por ela que o cardápio novo de um lugar daqui
+      // apaga esta resposta da borda antes do prazo.
+      expect(response.headers.get("vercel-cache-tag")).toBe(
+        "places-16-24278-37181",
+      );
     });
   });
 });

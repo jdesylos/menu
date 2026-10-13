@@ -33,6 +33,11 @@ async function getHandler(request, response) {
   const places = await place.findWithinTile(coordinates);
 
   response.setHeader("Cache-Control", CACHE_CONTROL);
+  // A hora na borda vale para o que muda devagar. O `has_menu` muda na hora em
+  // que alguém manda um cardápio, e sem isto o marcador do lugar seguia sem
+  // cor até o prazo vencer — e mais um pedido, pelo `stale-while-revalidate`.
+  // Com a etiqueta, `menu.create` apaga da borda os tiles do lugar.
+  response.setHeader("Vercel-Cache-Tag", place.cacheTag(coordinates));
 
   return response.status(200).json({ places });
 }

@@ -103,6 +103,36 @@ function bounds({ zoom, column, row }) {
   };
 }
 
+// O tile que cobre um ponto, num zoom — `bounds` ao contrário.
+//
+// Existe para quem sabe ONDE o dado mudou e precisa saber em quais tiles ele
+// viaja: ver `place.cacheTagsOf`.
+//
+// O ponto que cai exatamente na divisa de dois tiles fica no de leste e no de
+// sul, e só nele — `place.findWithinTile` o devolveria nos dois. É uma
+// coordenada que nenhum lugar de verdade tem.
+function containing({ latitude, longitude }, zoom) {
+  const gridSize = 2 ** zoom;
+  const latitudeInRadians = (latitude * Math.PI) / 180;
+
+  const column = ((longitude + 180) / 360) * gridSize;
+  // A projeção de Mercator, que `tileRowToLatitude` desfaz.
+  const row =
+    ((1 - Math.asinh(Math.tan(latitudeInRadians)) / Math.PI) / 2) * gridSize;
+
+  return {
+    zoom,
+    column: clampToGrid(column, gridSize),
+    row: clampToGrid(row, gridSize),
+  };
+}
+
+// A longitude 180 e as latitudes além do que a projeção alcança cairiam fora
+// da grade; ficam no último tile dela.
+function clampToGrid(position, gridSize) {
+  return Math.min(Math.max(Math.floor(position), 0), gridSize - 1);
+}
+
 function tileColumnToLongitude(column, gridSize) {
   return (column / gridSize) * 360 - 180;
 }
@@ -305,6 +335,7 @@ const tile = {
   parseCoordinates,
   isWithinServedArea,
   bounds,
+  containing,
   fetchVectorTile,
   dropUnusedLayers,
 };
