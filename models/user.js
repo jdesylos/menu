@@ -129,53 +129,6 @@ async function create(userInputValues) {
   }
 }
 
-async function update(username, userInputValues) {
-  const currentUser = await findOneByUsername(username);
-
-  if ("username" in userInputValues) {
-    await validateUniqueUsername(userInputValues.username);
-  }
-
-  if ("email" in userInputValues) {
-    await validateUniqueEmail(userInputValues.email);
-  }
-
-  if ("password" in userInputValues) {
-    await hashPasswordInObject(userInputValues);
-  }
-
-  const userWithNewValues = { ...currentUser, ...userInputValues };
-
-  const updatedUser = await runUpdateQuery(userWithNewValues);
-  return updatedUser;
-
-  async function runUpdateQuery(userWithNewValues) {
-    const results = await database.query({
-      text: `
-        UPDATE
-          users
-        SET
-          username = $2,
-          email = $3,
-          password = $4,
-          updated_at = timezone('utc', now())
-        WHERE
-          id = $1
-        RETURNING
-          *
-      `,
-      values: [
-        userWithNewValues.id,
-        userWithNewValues.username,
-        userWithNewValues.email,
-        userWithNewValues.password,
-      ],
-    });
-
-    return results.rows[0];
-  }
-}
-
 // `exceptUserId` é a conta que está trocando o próprio nome: sem deixá-la de
 // fora, mudar só as maiúsculas ("ana" para "Ana") esbarraria nela mesma.
 async function validateUniqueUsername(username, exceptUserId = null) {
@@ -563,7 +516,6 @@ const user = {
   findOneById,
   findOneByUsername,
   findOneByEmail,
-  update,
   setFeatures,
   addFeatures,
   changePassword,
