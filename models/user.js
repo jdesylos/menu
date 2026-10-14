@@ -176,7 +176,9 @@ async function update(username, userInputValues) {
   }
 }
 
-async function validateUniqueUsername(username) {
+// `exceptUserId` é a conta que está trocando o próprio nome: sem deixá-la de
+// fora, mudar só as maiúsculas ("ana" para "Ana") esbarraria nela mesma.
+async function validateUniqueUsername(username, exceptUserId = null) {
   const results = await database.query({
     text: `
       SELECT
@@ -185,16 +187,21 @@ async function validateUniqueUsername(username) {
         users
       WHERE
         LOWER(username) = LOWER($1)
+        AND ($2::uuid IS NULL OR id <> $2::uuid)
       ;`,
-    values: [username],
+    values: [username, exceptUserId],
   });
 
   if (results.rowCount > 0) {
-    throw new ValidationError({
-      message: "O username informado já está sendo utilizado.",
-      action: "Utilize outro username para realizar esta operação.",
-    });
+    throw usernameTakenError();
   }
+}
+
+function usernameTakenError() {
+  return new ValidationError({
+    message: "O username informado já está sendo utilizado.",
+    action: "Utilize outro username para realizar esta operação.",
+  });
 }
 
 async function validateUniqueEmail(email) {
@@ -476,6 +483,81 @@ async function changePassword({
   return results.rows[0];
 }
 
+// O teto da coluna (`varchar(30)`), contado em caracteres, como o Postgres
+// conta — e não em bytes.
+const USERNAME_MAX_LENGTH = 30;
+
+// Troca o nome de quem está com a sessão.
+//
+// O nome chega sem os espaços das pontas, com 1 a 30 caracteres, e não pode
+// ser o de outra conta — sem distinguir maiúsculas, como no cadastro. Mudar
+// só as maiúsculas do próprio nome vale.
+//
+// Não pede a senha, ao contrário da troca de senha: o nome não abre a conta,
+// e quem está com a sessão já pode fazer o que ele faria com ela.
+async function changeUsername({ userId, newUsername }) {
+  if (typeof newUsername !== "string" || newUsername.trim().length === 0) {
+    throw new ValidationError({
+      message: "O nome de usuário não foi informado.",
+      action: "Escolha um nome de usuário e tente de novo.",
+    });
+  }
+
+  const username = newUsername.trim();
+  if ([...username].length > USERNAME_MAX_LENGTH) {
+    throw new ValidationError({
+      message: `O nome de usuário passa de ${USERNAME_MAX_LENGTH} caracteres.`,
+      action: `Escolha um nome com até ${USERNAME_MAX_LENGTH} caracteres.`,
+    });
+  }
+
+  const currentUser = await findOneById(userId);
+  if (currentUser.username === username) {
+    throw new ValidationError({
+      message: "O nome de usuário novo é igual ao atual.",
+      action: "Escolha um nome diferente do atual.",
+    });
+  }
+
+  await validateUniqueUsername(username, userId);
+
+  let results;
+  try {
+    results = await database.query({
+      text: `
+        UPDATE
+          users
+        SET
+          username = $2,
+          updated_at = timezone('utc', now())
+        WHERE
+          id = $1
+          AND deleted_at IS NULL
+        RETURNING
+          *
+      ;`,
+      values: [userId, username],
+    });
+  } catch (error) {
+    // Duas contas pedindo o mesmo nome ao mesmo tempo passam as duas pela
+    // conferência acima, e quem separa a que chegou primeiro é o `unique` da
+    // coluna. A segunda ouve o mesmo que ouviria um segundo depois.
+    if (error.cause?.code === "23505") {
+      throw usernameTakenError();
+    }
+    throw error;
+  }
+
+  if (results.rowCount === 0) {
+    throw new NotFoundError({
+      message: "A conta informada não foi encontrada.",
+      action: "Entre de novo e tente trocar o nome outra vez.",
+    });
+  }
+
+  return results.rows[0];
+}
+
 const user = {
   create,
   findOneById,
@@ -486,6 +568,7 @@ const user = {
   addFeatures,
   changePassword,
   validateNewPassword,
+  changeUsername,
   erase,
 };
 
