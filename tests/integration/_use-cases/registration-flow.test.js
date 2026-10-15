@@ -30,14 +30,13 @@ describe("Use case: Registration Flow (all successful)", () => {
 
     expect(createUserResponse.status).toBe(201);
 
-    createUserResponseBody = await createUserResponse.json();
-
-    expect(createUserResponseBody).toEqual({
-      id: createUserResponseBody.id,
-      username: "RegistrationFlow",
-      created_at: createUserResponseBody.created_at,
-      updated_at: createUserResponseBody.updated_at,
+    // A resposta não traz a conta — ver `pages/api/v1/users`. Quem é ela,
+    // o teste pergunta ao banco.
+    expect(await createUserResponse.json()).toEqual({
+      message:
+        "Se este email ainda não estava cadastrado, enviamos um link de ativação. Verifique sua caixa de entrada.",
     });
+    createUserResponseBody = await user.findOneByUsername("RegistrationFlow");
   });
 
   test("Receive activation email", async () => {
@@ -48,7 +47,9 @@ describe("Use case: Registration Flow (all successful)", () => {
       "<registration.flow@menuspoiler.com.br>",
     );
     expect(lastEmail.subject).toBe("Ative seu cadastro no Menu Spoiler!");
-    expect(lastEmail.text).toContain("RegistrationFlow");
+    // Sem o nome de usuário: quem cadastra escolhe o nome, e o email pode ser
+    // de outra pessoa.
+    expect(lastEmail.text).not.toContain("RegistrationFlow");
 
     activationTokenId = orchestrator.extractUUID(lastEmail.text);
 

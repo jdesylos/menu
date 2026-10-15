@@ -10,11 +10,22 @@ import menu from "models/menu.js";
 // O lugar vem no corpo, no POST, e em `?place_id=`, no GET.
 //
 // Ler é público, como o mapa: saber o prato e o preço antes de chegar é o
-// produto, e não pede conta. Mandar pede `create:menu`.
+// produto, e não pede conta. Mandar pede `create:menu`, e cada conta manda no
+// máximo dez cardápios por hora: ninguém revisa o que chega, e cada envio
+// ainda apaga cinco tiles da borda.
 export default createRouter()
   .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
-  .post(controller.canRequest("create:menu"), postHandler)
+  .post(
+    controller.canRequest("create:menu"),
+    controller.rateLimit({
+      key: "menu",
+      limit: 10,
+      windowMs: 60 * 60 * 1000,
+      per: "user",
+    }),
+    postHandler,
+  )
   .get(getHandler)
   .handler(controller.errorHandlers);
 

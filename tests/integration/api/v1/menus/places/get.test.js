@@ -128,19 +128,25 @@ describe("GET /api/v1/menus/places", () => {
       expect(cacheControl).toContain("no-store");
     });
 
-    // O resumo é o do cardápio que vale: o mais recente.
+    // O resumo é o do cardápio que vale: o mais recente. O mais velho entra
+    // direto no banco — a rota não aceita mais um segundo cardápio.
     test("With a place that received two menus", async () => {
       const sessionObject = await sessionForActivatedUser();
       const placeId = await createPlace("Bar que Mudou", {
         latitude: -23.5,
         longitude: -46.6,
       });
-      await send(placeId, ["Antigo"], sessionObject);
       const newest = await send(
         placeId,
         ["Novo", "Novo 2", "Novo 3"],
         sessionObject,
       );
+      await orchestrator.insertMenu({
+        placeId,
+        userId: sessionObject.user_id,
+        itemNames: ["Antigo"],
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
 
       const { body } = await list();
       const found = body.places.filter((place) => place.id === placeId);

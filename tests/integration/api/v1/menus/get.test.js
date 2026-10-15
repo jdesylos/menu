@@ -84,12 +84,19 @@ describe("GET /api/v1/menus", () => {
       expect(cacheControl).toContain("no-store");
     });
 
-    // Cada envio é um cardápio novo, e o que vale é o mais recente.
+    // Cada envio é um cardápio novo, e o que vale é o mais recente. A rota
+    // não aceita mais um segundo — ver `menu.create` —, e o mais velho entra
+    // direto no banco: é o histórico de antes da trava.
     test("With a place that received two menus", async () => {
       const placeId = await createPlace("Bar que Mudou o Cardápio");
       const sessionObject = await sessionForActivatedUser();
-      await send(placeId, "Prato antigo", sessionObject);
       const newest = await send(placeId, "Prato novo", sessionObject);
+      await orchestrator.insertMenu({
+        placeId,
+        userId: sessionObject.user_id,
+        itemNames: ["Prato antigo"],
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
 
       const { status, body } = await read(placeId);
 

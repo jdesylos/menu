@@ -101,13 +101,14 @@ async function findOneValidById(tokenId) {
 }
 
 // O link é o do domínio do aplicativo, e o caminho é o que o filtro dele
-// aceita — ver `pages/senha/recuperar/[token].js`.
+// aceita — ver `pages/senha/recuperar/[token].js`. Sem o nome de usuário no
+// texto, pelo motivo de `activation.sendEmailToUser`.
 async function sendEmailToUser(user, recoveryToken) {
   await email.send({
     from: "Menu Spoiler <contato@menuspoiler.com.br>",
     to: user.email,
     subject: "Crie uma senha nova no Menu Spoiler",
-    text: `${user.username}, recebemos um pedido para trocar a senha da sua conta no Menu Spoiler.
+    text: `Olá! Recebemos um pedido para trocar a senha da sua conta no Menu Spoiler.
 
 Para criar uma senha nova, abra este link no celular em que o aplicativo está instalado:
 

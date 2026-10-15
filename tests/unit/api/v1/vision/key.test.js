@@ -1,6 +1,9 @@
 import rota from "pages/api/v1/vision/key/index.js";
 import session from "models/session.js";
 import user from "models/user.js";
+import rateLimit from "models/rateLimit.js";
+import auditLog from "models/auditLog.js";
+import { RateLimitError } from "infra/errors.js";
 
 // A rota exige sessão, e quem a resolve é o banco. Aqui o banco não entra:
 // os dois modelos respondem o que cada teste disser, e o que se afirma é o que
@@ -12,6 +15,16 @@ jest.mock("models/session.js", () => ({
 jest.mock("models/user.js", () => ({
   __esModule: true,
   default: { findOneById: jest.fn() },
+}));
+// O limite e o registro também são do banco: o teste diz o que o limite
+// responde e confere o que a rota registrou.
+jest.mock("models/rateLimit.js", () => ({
+  __esModule: true,
+  default: { check: jest.fn() },
+}));
+jest.mock("models/auditLog.js", () => ({
+  __esModule: true,
+  default: { record: jest.fn() },
 }));
 
 // Teste de UNIDADE, e não de integração como o resto das rotas: o que se
@@ -76,9 +89,54 @@ describe("GET /api/v1/vision/key", () => {
 
       expect(r.statusCode).toBe(200);
       expect(r.corpo).toEqual({ key: "chave-de-teste" });
+      // Por conta, e registrado com ela: num vazamento, é o que diz quem a
+      // pegou.
+      expect(rateLimit.check).toHaveBeenCalledWith({
+        identifier: "vision_key:user:conta-de-teste",
+        limit: 20,
+        windowMs: 60 * 60 * 1000,
+      });
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "vision.key_delivered",
+          actorUserId: "conta-de-teste",
+        }),
+      );
       // Chave em cache de borda sobreviveria à troca dela, que é justamente o
       // que esta rota existe para permitir.
       expect(r.headers["Cache-Control"]).toBe("no-store");
+    });
+
+    test("passado o limite da conta, não entrega nem registra", async () => {
+      rateLimit.check.mockRejectedValue(
+        new RateLimitError({ message: "Muitas tentativas.", retryAfter: 60 }),
+      );
+      const r = resposta();
+      await rota(
+        pedido({ "x-vision-token": "token-de-teste" }, entrou(["create:menu"])),
+        r,
+      );
+
+      expect(r.statusCode).toBe(429);
+      expect(JSON.stringify(r.corpo)).not.toContain("chave-de-teste");
+      expect(auditLog.record).not.toHaveBeenCalled();
+    });
+
+    // O limite e o registro são de quem recebe a chave: a recusa não gasta a
+    // cota de ninguém nem enche o registro.
+    test("a recusa não conta no limite nem fica registrada", async () => {
+      const r = resposta();
+      await rota(
+        pedido(
+          { "x-vision-token": "token-de-teste" },
+          entrou(["read:activation_token"]),
+        ),
+        r,
+      );
+
+      expect(r.statusCode).toBe(403);
+      expect(rateLimit.check).not.toHaveBeenCalled();
+      expect(auditLog.record).not.toHaveBeenCalled();
     });
 
     test("recusa quem não traz o token", async () => {

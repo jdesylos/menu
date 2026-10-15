@@ -106,7 +106,8 @@ terminar.
 | `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
 | `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
 | `GET /api/v1/user/menus`               | Os cardápios que a conta mandou    |
-| `GET /api/v1/vision/key`               | Chave do provedor de visão         |
+| `POST /api/v1/vision/read`             | Lê a foto de um cardápio           |
+| `GET /api/v1/vision/key`               | Chave do provedor (de saída)       |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -116,6 +117,20 @@ O login aceita **5 tentativas por IP a cada 15 minutos** (`429` com `Retry-After
 disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os dois vieram do
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
+
+### Criar a conta
+
+`POST /api/v1/users` aceita **5 cadastros por IP a cada hora**: cada um manda um email do
+nosso domínio para o endereço que veio no corpo, e sem teto a rota enchia a caixa de
+qualquer um. A resposta é **a mesma** (`201` com uma frase) para o email novo e para o que
+já tem conta, e leva o mesmo tempo — no repetido a senha também passa pelo bcrypt. Quem
+fica sabendo da tentativa é o dono do email, por um aviso, e ela fica em `audit_logs`
+(`user.signup_duplicate_email`). O nome de usuário repetido continua respondendo `400`: o
+nome não é segredo, e sem isso não haveria como escolher outro.
+
+Os emails da conta não levam o nome de usuário: quem cadastra escolhe o nome, e o email
+pode ser de outra pessoa — com o nome no texto, qualquer um poria a frase que quisesse no
+começo de um email assinado por `contato@menuspoiler.com.br`.
 
 ### Trocar a senha
 
@@ -343,12 +358,16 @@ nada: confere-se a forma, e guarda-se.
   de verdade, e o título da seção pode ser vazio.
 - **Dinheiro é inteiro**, em centavos (`price_cents`). Número quebrado volta `400`: é o preço
   em reais mandado no lugar dos centavos.
-- **Cada envio é um cardápio novo.** O que vale para o lugar é o mais recente; os anteriores
+- **Só o primeiro cardápio de cada lugar, por ora.** O que vale é o mais recente, e
+  qualquer conta ativada manda cardápio: sem trava, um `POST` trocava o preço de qualquer
+  lugar do mapa, e ninguém revisa o que chega. Um lugar que já tem cardápio responde `400`.
+  Os lugares que já tinham mais de um continuam valendo pelo mais recente, e os anteriores
   ficam guardados, como registro de quem mandou o quê.
 - **Três tabelas** (`menus`, `menu_sections`, `menu_items`), e não um documento: o produto é
   procurar prato e comparar preço entre lugares.
 
-Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é público, como o mapa.
+Mandar exige a feature `create:menu`, que toda conta ativada tem, e cada conta manda **no
+máximo 10 cardápios por hora**. Ler é público, como o mapa.
 
 `GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
 (quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e
@@ -367,10 +386,33 @@ etiqueta dele no cabeçalho `Vercel-Cache-Tag`, e `menu.create` pede a purga por
 `infra/cdn.js`. Sem isso o lugar aparecia na lista de cardápios, que não passa pela borda, e
 seguia sem cor no mapa. Fora da Vercel não há borda, e a purga não faz nada.
 
-A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
-chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma conta com
-`create:menu`**, além do token do aplicativo (`x-vision-token`) — sem conta, não há leitura.
-Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
+### Ler a foto do cardápio
+
+`POST /api/v1/vision/read` recebe a foto crua (`Content-Type: image/jpeg`, até 3 MB) e
+devolve o cardápio estruturado — `{ model, menu }`, com `menu` no formato do schema de
+`models/menuReading.js`. Quem fala com o provedor de visão (o Gemini) é o servidor, com a
+chave de `GEMINI_API_KEY`, que **não sai daqui**. A foto não é guardada: existe só na
+memória da função enquanto é lida.
+
+- Exige **sessão de uma conta com `create:menu`**, a mesma feature de mandar o cardápio.
+- **Sem limite de leituras por conta**, por decisão: a chave não sai do servidor, e o que
+  segura o gasto é o **teto na conta do provedor**. Cada leitura fica em `audit_logs`
+  (`vision.read`, com a conta e o IP), e o modelo, o tempo e os tokens vão para o log da
+  função.
+- A cadeia de modelos, do melhor ao último recurso, está em `infra/gemini.js`: a cota
+  esgotada e a sobrecarga passam ao próximo; o crédito acabado, a chave errada e a foto
+  recusada param na hora. A leitura inteira desiste em 270 s, abaixo dos 300 s da função.
+- O status diz ao aplicativo o que dizer: `503` é "tente mais tarde" (sem crédito, sem cota
+  em nenhum modelo, sem a chave no ambiente), `504` é "tente de novo" (sobrecarga, prazo),
+  `422` é a foto que o provedor não leu, e `502` é a resposta que veio fora do formato.
+- Não passa por `controller.shareDatabaseConnection`: a conexão ficaria presa ao pedido
+  enquanto o provedor lê.
+
+`GET /api/v1/vision/key` é o caminho antigo, **de saída**: entregava a chave ao aplicativo,
+que chamava o provedor direto. Exige sessão com `create:menu` e o token do aplicativo
+(`x-vision-token`), registra cada entrega em `audit_logs` (`vision.key_delivered`) e limita
+cada conta a 20 entregas por hora. Sai quando o aplicativo passar a ler pela rota acima, e
+com ela a variável `VISION_TOKEN`.
 
 ## Deploy
 

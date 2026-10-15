@@ -62,7 +62,8 @@ describe("POST /api/v1/recoveries", () => {
       expect(email.sender).toBe("<contato@menuspoiler.com.br>");
       expect(email.recipients[0]).toBe("<quem.esqueceu@menuspoiler.com.br>");
       expect(email.subject).toBe("Crie uma senha nova no Menu Spoiler");
-      expect(email.text).toContain("QuemEsqueceu");
+      // Sem o nome de usuário — ver `activation.sendEmailToUser`.
+      expect(email.text).not.toContain("QuemEsqueceu");
       // O link é o caminho que o aplicativo aceita, com o token da linha.
       expect(email.text).toContain(
         `${webserver.origin}/senha/recuperar/${tokens[0].id}`,

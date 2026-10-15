@@ -1,6 +1,7 @@
 import orchestrator from "tests/orchestrator.js";
 import webserver from "infra/webserver.js";
 import database from "infra/database.js";
+import user from "models/user.js";
 
 beforeAll(async () => {
   await orchestrator.waitForAllServices();
@@ -190,7 +191,14 @@ describe("DELETE /api/v1/user", () => {
         }),
       });
 
+      // O cadastro responde igual com o email livre e com o que tem conta: a
+      // prova é a conta nova no banco, com o email e o nome de volta.
       expect(response.status).toBe(201);
+      const created = await user.findOneByEmail(
+        "email.que.volta@menuspoiler.com.br",
+      );
+      expect(created.username).toBe("NomeQueVolta");
+      expect(created.features).toEqual(["read:activation_token"]);
     });
 
     test("The activation links and the audit IPs go with it", async () => {
