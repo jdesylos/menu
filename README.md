@@ -81,10 +81,11 @@ terminar.
 | `GET /api/v1/status`                   | Status do sistema e do banco       |
 | `POST /api/v1/users`                   | Cria uma conta                     |
 | `GET /api/v1/users/[username]`         | Dados de outro usuário (sessão)    |
-| `PATCH /api/v1/users/[username]`       | Atualiza um usuário                |
+| `PATCH /api/v1/users/[username]`       | Troca o nome de um usuário         |
 | `GET /api/v1/user`                     | Usuário da sessão atual            |
 | `DELETE /api/v1/user`                  | Apaga a conta da sessão atual      |
 | `PATCH /api/v1/user/password`          | Troca a senha da sessão atual      |
+| `PATCH /api/v1/user/username`          | Troca o nome da sessão atual       |
 | `POST /api/v1/sessions`                | Login                              |
 | `DELETE /api/v1/sessions`              | Logout                             |
 | `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
@@ -126,8 +127,23 @@ As **outras** sessões da conta são encerradas na mesma instrução; a que pedi
 A senha atual errada responde `400`, e não `401` — para o aplicativo, `401` é sessão
 morta. O limite é o do login: cinco tentativas por IP a cada quinze minutos.
 
-A rota `PATCH /api/v1/users/[username]` continua trocando senha sem pedir a atual: ela
-serve a quem administra, e o aplicativo não a usa.
+### Trocar o nome de usuário
+
+`PATCH /api/v1/user/username` `{ username }` troca o nome de quem está com a sessão, e
+responde com a conta como o `GET /api/v1/user` a devolve. O nome chega sem os espaços das
+pontas, com 1 a 30 caracteres, e não pode ser o mesmo de agora. Um nome de outra conta é
+recusado sem distinguir maiúsculas, como no cadastro; mudar só as maiúsculas do próprio
+nome vale.
+
+Não pede a senha: o nome não abre a conta. O limite é de **10 tentativas por IP a cada 15
+minutos**, porque cada resposta diz se um nome está em uso, e sem teto a rota serviria
+para levantar a lista de contas. A troca fica em `audit_logs` como
+`user.username_changed`.
+
+`PATCH /api/v1/users/[username]` troca **só o nome**, pelas mesmas regras: o da própria
+conta, ou o de outra para quem tem `update:user:others`. Qualquer outro campo no corpo
+responde `400`: a senha se troca por `PATCH /api/v1/user/password`, que pede a atual, e o
+email não se troca por rota nenhuma. Essa rota não tem o limite de tentativas.
 
 ### Apagar a conta
 
