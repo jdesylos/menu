@@ -105,6 +105,7 @@ terminar.
 | `POST /api/v1/menus`                   | Manda o cardápio de um lugar       |
 | `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
 | `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
+| `GET /api/v1/user/menus`               | Os cardápios que a conta mandou    |
 | `GET /api/v1/vision/key`               | Chave do provedor de visão         |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
@@ -352,6 +353,12 @@ Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é públic
 `GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
 (quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e
 `lon`, os mais próximos primeiro; sem eles, os mais recentes. São no máximo 50.
+
+`GET /api/v1/user/menus` é a mesma lista, só com os lugares para onde a conta da sessão
+mandou cardápio — a aba "Meus cardápios" do aplicativo. Do envio mais recente para o mais
+antigo, um lugar por linha, e o resumo é o do último cardápio que **a conta** mandou para
+ele, mesmo que outra pessoa tenha mandado um depois. Apagar a conta não apaga os cardápios
+dela: eles continuam valendo para os lugares, na lista de todos.
 
 E cada lugar do tile (`GET /api/v1/places/[z]/[x]/[y]`) traz `has_menu`: o aplicativo pinta
 de verde o marcador de quem tem cardápio. O tile fica uma hora na borda, e por isso guardar

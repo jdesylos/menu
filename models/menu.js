@@ -329,6 +329,39 @@ async function findOneById(id) {
   return result.rows[0];
 }
 
+// Uma linha da lista de lugares com cardápio: o que o mapa já diz do lugar,
+// mais o resumo de um cardápio dele — quantos pratos e de quando é. Quem
+// escolhe QUAL cardápio é a consulta, numa subconsulta chamada `latest`.
+//
+// A contagem de pratos fica aqui, fora da subconsulta: assim ela roda só para
+// o cardápio escolhido, e não para cada um que o lugar já recebeu.
+const SELECT_PLACE_WITH_MENU = `
+  SELECT
+    places.id,
+    places.name,
+    places.category,
+    places.latitude,
+    places.longitude,
+    places.street,
+    places.neighborhood,
+    places.locality,
+    places.region,
+    places.postcode,
+    jsonb_build_object(
+      'id', latest.id,
+      'items', (
+        SELECT
+          count(*)::int
+        FROM
+          menu_items
+          INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
+        WHERE
+          menu_sections.menu_id = latest.id
+      ),
+      'created_at', latest.created_at
+    ) AS menu
+`;
+
 // Quantos lugares a listagem devolve. Não é paginada ainda: são os mais
 // próximos de quem pergunta, e quem quer um lugar longe o acha pela busca.
 const MAX_PLACES = 50;
@@ -350,10 +383,6 @@ const MAX_PLACES = 50;
 // aplicativo espera. O `DISTINCT ON` fica com o cardápio mais recente de cada
 // lugar, pelo índice de `(place_id, created_at DESC)`, e o custo passa a ser
 // o número de cardápios.
-//
-// A contagem de pratos fica na lista de saída, fora do `DISTINCT ON`: assim
-// ela roda só para o cardápio que vale, e não para cada um que o lugar já
-// recebeu.
 async function findPlaces({ latitude, longitude }) {
   const hasOrigin = latitude !== null && longitude !== null;
 
@@ -369,30 +398,7 @@ async function findPlaces({ latitude, longitude }) {
 
   const result = await database.query({
     text: `
-      SELECT
-        places.id,
-        places.name,
-        places.category,
-        places.latitude,
-        places.longitude,
-        places.street,
-        places.neighborhood,
-        places.locality,
-        places.region,
-        places.postcode,
-        jsonb_build_object(
-          'id', latest.id,
-          'items', (
-            SELECT
-              count(*)::int
-            FROM
-              menu_items
-              INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
-            WHERE
-              menu_sections.menu_id = latest.id
-          ),
-          'created_at', latest.created_at
-        ) AS menu
+      ${SELECT_PLACE_WITH_MENU}
       FROM
         (
           SELECT DISTINCT ON (menus.place_id)
@@ -415,6 +421,56 @@ async function findPlaces({ latitude, longitude }) {
         $${values.length}
     ;`,
     values,
+  });
+
+  return result.rows;
+}
+
+// Os lugares para onde `userId` mandou cardápio, do envio mais recente para o
+// mais antigo — a aba "Meus cardápios" do aplicativo.
+//
+// O resumo de cada lugar é o do último cardápio que ESTA conta mandou para
+// ele, e não o do que vale: se outra pessoa mandou um depois, a linha continua
+// dizendo o que a conta mandou. Hoje os dois são o mesmo, porque o aplicativo
+// não manda cardápio para um lugar que já tem um.
+//
+// O lugar oculto fica de fora, como na lista de todos: o cardápio dele
+// continua guardado, mas não há mais o lugar no mapa para abri-lo.
+//
+// A conta apagada não chega aqui — sem sessão, não há quem pergunte —, e os
+// cardápios dela continuam valendo para os lugares, na lista de todos.
+//
+// Parte de `menus` pelo índice de `created_by`: o custo é o número de
+// cardápios que a conta mandou.
+async function findPlacesByCreator(userId) {
+  const result = await database.query({
+    text: `
+      ${SELECT_PLACE_WITH_MENU}
+      FROM
+        (
+          SELECT DISTINCT ON (menus.place_id)
+            menus.id,
+            menus.place_id,
+            menus.created_at
+          FROM
+            menus
+          WHERE
+            menus.created_by = $1
+          ORDER BY
+            menus.place_id,
+            menus.created_at DESC,
+            menus.id DESC
+        ) AS latest
+        INNER JOIN places ON places.id = latest.place_id
+      WHERE
+        places.hidden_at IS NULL
+      ORDER BY
+        latest.created_at DESC,
+        places.id
+      LIMIT
+        $2
+    ;`,
+    values: [userId, MAX_PLACES],
   });
 
   return result.rows;
@@ -471,6 +527,7 @@ const menu = {
   create,
   findLatestByPlaceId,
   findPlaces,
+  findPlacesByCreator,
 };
 
 export default menu;
