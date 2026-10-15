@@ -53,6 +53,11 @@ describe("POST /api/v1/users", () => {
       const userInDatabase = await user.findOneByUsername("menuspoiler");
       expect(await auditActions(userInDatabase.id)).toEqual(["user.created"]);
 
+      // O email não leva o nome de usuário, que é quem cadastra que escolhe.
+      const lastEmail = await orchestrator.getLastEmail();
+      expect(lastEmail.subject).toBe("Ative seu cadastro no Menu Spoiler!");
+      expect(lastEmail.text).not.toContain("menuspoiler,");
+
       const correctPasswordMatch = await password.compare(
         "senha123",
         userInDatabase.password,

@@ -109,14 +109,22 @@ async function activateUserByUserId(userId) {
   return activatedUser;
 }
 
+// Os emails da conta não levam o nome de usuário. Quem cria a conta escolhe o
+// nome e o email, e o email pode ser de outra pessoa: com o nome no texto,
+// qualquer um faria `contato@menuspoiler.com.br` entregar a um estranho a
+// frase que quisesse — "acesse tal site", no primeiro lugar do email,
+// assinado pelo nosso domínio.
 async function sendEmailToUser(user, activationToken) {
   await email.send({
     from: "Menu Spoiler <contato@menuspoiler.com.br>",
     to: user.email,
     subject: "Ative seu cadastro no Menu Spoiler!",
-    text: `${user.username}, clique no link abaixo para ativar seu cadastro no Menu Spoiler:
+    text: `Olá! Clique no link abaixo para ativar seu cadastro no Menu Spoiler:
 
 ${webserver.origin}/cadastro/ativar/${activationToken.id}
+
+Se não foi você quem se cadastrou, ignore este email: sem o link, a conta não
+é ativada.
 
 Atenciosamente,
 Equipe Menu Spoiler`,

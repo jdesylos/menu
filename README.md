@@ -127,6 +127,10 @@ fica sabendo da tentativa é o dono do email, por um aviso, e ela fica em `audit
 (`user.signup_duplicate_email`). O nome de usuário repetido continua respondendo `400`: o
 nome não é segredo, e sem isso não haveria como escolher outro.
 
+Os emails da conta não levam o nome de usuário: quem cadastra escolhe o nome, e o email
+pode ser de outra pessoa — com o nome no texto, qualquer um poria a frase que quisesse no
+começo de um email assinado por `contato@menuspoiler.com.br`.
+
 ### Trocar a senha
 
 `PATCH /api/v1/user/password` `{ current_password, password }` troca a senha de quem está

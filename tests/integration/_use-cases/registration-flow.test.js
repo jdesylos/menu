@@ -47,7 +47,9 @@ describe("Use case: Registration Flow (all successful)", () => {
       "<registration.flow@menuspoiler.com.br>",
     );
     expect(lastEmail.subject).toBe("Ative seu cadastro no Menu Spoiler!");
-    expect(lastEmail.text).toContain("RegistrationFlow");
+    // Sem o nome de usuário: quem cadastra escolhe o nome, e o email pode ser
+    // de outra pessoa.
+    expect(lastEmail.text).not.toContain("RegistrationFlow");
 
     activationTokenId = orchestrator.extractUUID(lastEmail.text);
 
