@@ -3,8 +3,8 @@
 // A chave (`GEMINI_API_KEY`) vive só na variável de ambiente e não sai daqui:
 // o aplicativo manda a foto a `POST /api/v1/vision/read`, e quem fala com o
 // Google é este arquivo. Antes era o aplicativo que chamava, com a chave
-// entregue por `GET /api/v1/vision/key`, e quem tivesse uma conta e o
-// aplicativo tinha a chave.
+// que uma rota lhe entregava, e quem tivesse uma conta e o aplicativo tinha a
+// chave. A rota saiu.
 //
 // Veio do aplicativo (`net::gemini`), com a mesma cadeia de modelos e a mesma
 // leitura das falhas. O pedido é montado por quem chama — ver

@@ -47,8 +47,8 @@ const availableFeatures = [
   "read:place_suggestion",
 
   // MENU
-  // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota que
-  // entrega a chave do provedor de visão exige a mesma feature, porque quem
+  // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota de
+  // leitura (`POST /api/v1/vision/read`) exige a mesma feature, porque quem
   // não pode mandar não tem por que gastar a leitura. Toda conta ativada tem.
   "create:menu",
   // Chave de formatação do `filterOutput`, como a `read:place_suggestion`:

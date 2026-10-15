@@ -107,7 +107,6 @@ terminar.
 | `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
 | `GET /api/v1/user/menus`               | Os cardápios que a conta mandou    |
 | `POST /api/v1/vision/read`             | Lê a foto de um cardápio           |
-| `GET /api/v1/vision/key`               | Chave do provedor (de saída)       |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -408,11 +407,10 @@ memória da função enquanto é lida.
 - Não passa por `controller.shareDatabaseConnection`: a conexão ficaria presa ao pedido
   enquanto o provedor lê.
 
-`GET /api/v1/vision/key` é o caminho antigo, **de saída**: entregava a chave ao aplicativo,
-que chamava o provedor direto. Exige sessão com `create:menu` e o token do aplicativo
-(`x-vision-token`), registra cada entrega em `audit_logs` (`vision.key_delivered`) e limita
-cada conta a 20 entregas por hora. Sai quando o aplicativo passar a ler pela rota acima, e
-com ela a variável `VISION_TOKEN`.
+Até outubro de 2026 o aplicativo chamava o provedor direto, com a chave que
+`GET /api/v1/vision/key` lhe entregava, trancada por um token que ia dentro do
+aplicativo. A rota saiu quando o aplicativo passou a ler por aqui, e com ela a variável
+`VISION_TOKEN`.
 
 ## Deploy
 
@@ -447,8 +445,7 @@ enxerga o repositório na hora de importar e cada push já vira um deploy.
 | `EMAIL_SMTP_USER`     | Provedor de e-mail transacional               |
 | `EMAIL_SMTP_PASSWORD` | Provedor de e-mail transacional               |
 | `PROTOMAPS_API_KEY`   | Protomaps — chave da API de tiles do mapa     |
-| `GEMINI_API_KEY`      | Provedor de visão — a chave que o app recebe  |
-| `VISION_TOKEN`        | Escolhido por você — a tranca da rota acima   |
+| `GEMINI_API_KEY`      | Provedor de visão — só o servidor a usa       |
 
 Em produção a conexão com o Postgres usa SSL automaticamente; `POSTGRES_CA` só é
 necessário se você quiser validar contra um certificado específico.
