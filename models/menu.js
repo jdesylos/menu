@@ -329,6 +329,39 @@ async function findOneById(id) {
   return result.rows[0];
 }
 
+// Uma linha da lista de lugares com cardápio: o que o mapa já diz do lugar,
+// mais o resumo de um cardápio dele — quantos pratos e de quando é. Quem
+// escolhe QUAL cardápio é a consulta, numa subconsulta chamada `latest`.
+//
+// A contagem de pratos fica aqui, fora da subconsulta: assim ela roda só para
+// o cardápio escolhido, e não para cada um que o lugar já recebeu.
+const SELECT_PLACE_WITH_MENU = `
+  SELECT
+    places.id,
+    places.name,
+    places.category,
+    places.latitude,
+    places.longitude,
+    places.street,
+    places.neighborhood,
+    places.locality,
+    places.region,
+    places.postcode,
+    jsonb_build_object(
+      'id', latest.id,
+      'items', (
+        SELECT
+          count(*)::int
+        FROM
+          menu_items
+          INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
+        WHERE
+          menu_sections.menu_id = latest.id
+      ),
+      'created_at', latest.created_at
+    ) AS menu
+`;
+
 // Quantos lugares a listagem devolve. Não é paginada ainda: são os mais
 // próximos de quem pergunta, e quem quer um lugar longe o acha pela busca.
 const MAX_PLACES = 50;
@@ -350,10 +383,6 @@ const MAX_PLACES = 50;
 // aplicativo espera. O `DISTINCT ON` fica com o cardápio mais recente de cada
 // lugar, pelo índice de `(place_id, created_at DESC)`, e o custo passa a ser
 // o número de cardápios.
-//
-// A contagem de pratos fica na lista de saída, fora do `DISTINCT ON`: assim
-// ela roda só para o cardápio que vale, e não para cada um que o lugar já
-// recebeu.
 async function findPlaces({ latitude, longitude }) {
   const hasOrigin = latitude !== null && longitude !== null;
 
@@ -369,30 +398,7 @@ async function findPlaces({ latitude, longitude }) {
 
   const result = await database.query({
     text: `
-      SELECT
-        places.id,
-        places.name,
-        places.category,
-        places.latitude,
-        places.longitude,
-        places.street,
-        places.neighborhood,
-        places.locality,
-        places.region,
-        places.postcode,
-        jsonb_build_object(
-          'id', latest.id,
-          'items', (
-            SELECT
-              count(*)::int
-            FROM
-              menu_items
-              INNER JOIN menu_sections ON menu_sections.id = menu_items.section_id
-            WHERE
-              menu_sections.menu_id = latest.id
-          ),
-          'created_at', latest.created_at
-        ) AS menu
+      ${SELECT_PLACE_WITH_MENU}
       FROM
         (
           SELECT DISTINCT ON (menus.place_id)
