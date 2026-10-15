@@ -106,7 +106,8 @@ terminar.
 | `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
 | `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
 | `GET /api/v1/user/menus`               | Os cardápios que a conta mandou    |
-| `GET /api/v1/vision/key`               | Chave do provedor de visão         |
+| `POST /api/v1/vision/read`             | Lê a foto de um cardápio           |
+| `GET /api/v1/vision/key`               | Chave do provedor (de saída)       |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -385,16 +386,33 @@ etiqueta dele no cabeçalho `Vercel-Cache-Tag`, e `menu.create` pede a purga por
 `infra/cdn.js`. Sem isso o lugar aparecia na lista de cardápios, que não passa pela borda, e
 seguia sem cor no mapa. Fora da Vercel não há borda, e a purga não faz nada.
 
-A foto não passa por este servidor: o aplicativo chama o provedor de visão direto, com a
-chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma conta com
-`create:menu`**, além do token do aplicativo (`x-vision-token`) — sem conta, não há leitura.
-Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
+### Ler a foto do cardápio
 
-O token viaja dentro do aplicativo e sai dele com `strings`: quem tem uma conta ativada e o
-aplicativo tem a chave. Por isso cada entrega fica em `audit_logs` (`vision.key_delivered`,
-com a conta e o IP), e cada conta pega a chave no máximo 20 vezes por hora. O limite não
-impede um vazamento — uma entrega basta —; o que limita o estrago é o **teto de gasto na
-conta do provedor**.
+`POST /api/v1/vision/read` recebe a foto crua (`Content-Type: image/jpeg`, até 3 MB) e
+devolve o cardápio estruturado — `{ model, menu }`, com `menu` no formato do schema de
+`models/menuReading.js`. Quem fala com o provedor de visão (o Gemini) é o servidor, com a
+chave de `GEMINI_API_KEY`, que **não sai daqui**. A foto não é guardada: existe só na
+memória da função enquanto é lida.
+
+- Exige **sessão de uma conta com `create:menu`**, a mesma feature de mandar o cardápio.
+- **Sem limite de leituras por conta**, por decisão: a chave não sai do servidor, e o que
+  segura o gasto é o **teto na conta do provedor**. Cada leitura fica em `audit_logs`
+  (`vision.read`, com a conta e o IP), e o modelo, o tempo e os tokens vão para o log da
+  função.
+- A cadeia de modelos, do melhor ao último recurso, está em `infra/gemini.js`: a cota
+  esgotada e a sobrecarga passam ao próximo; o crédito acabado, a chave errada e a foto
+  recusada param na hora. A leitura inteira desiste em 270 s, abaixo dos 300 s da função.
+- O status diz ao aplicativo o que dizer: `503` é "tente mais tarde" (sem crédito, sem cota
+  em nenhum modelo, sem a chave no ambiente), `504` é "tente de novo" (sobrecarga, prazo),
+  `422` é a foto que o provedor não leu, e `502` é a resposta que veio fora do formato.
+- Não passa por `controller.shareDatabaseConnection`: a conexão ficaria presa ao pedido
+  enquanto o provedor lê.
+
+`GET /api/v1/vision/key` é o caminho antigo, **de saída**: entregava a chave ao aplicativo,
+que chamava o provedor direto. Exige sessão com `create:menu` e o token do aplicativo
+(`x-vision-token`), registra cada entrega em `audit_logs` (`vision.key_delivered`) e limita
+cada conta a 20 entregas por hora. Sai quando o aplicativo passar a ler pela rota acima, e
+com ela a variável `VISION_TOKEN`.
 
 ## Deploy
 
