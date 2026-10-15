@@ -2,7 +2,8 @@ import { createRouter } from "next-connect";
 import controller from "infra/controller.js";
 import user from "models/user.js";
 import authorization from "models/authorization.js";
-import { ForbiddenError } from "infra/errors.js";
+import auditLog from "models/auditLog.js";
+import { ForbiddenError, ValidationError } from "infra/errors.js";
 
 export default createRouter()
   .use(controller.shareDatabaseConnection)
@@ -28,9 +29,16 @@ async function getHandler(request, response) {
   return response.status(200).json(secureOutputValues);
 }
 
+// Por aqui só se troca o nome. A senha tem rota própria, que pede a atual
+// (`/user/password`), e o email não se troca: aceitar os dois sem pedir nada
+// entregava a conta a quem estivesse com uma sessão na mão — trocava-se a
+// senha sem saber a de antes, e o email sem confirmar o novo.
+//
+// Recusa, e não ignora, o que vier além do nome: quem mandou uma senha nova e
+// ouvisse 200 acharia que a trocou.
 async function patchHandler(request, response) {
   const username = request.query.username;
-  const userInputValues = request.body;
+  const { username: newUsername, ...otherValues } = request.body || {};
 
   const userTryingToPatch = request.context.user;
   const targetUser = await user.findOneByUsername(username);
@@ -43,7 +51,25 @@ async function patchHandler(request, response) {
     });
   }
 
-  const updatedUser = await user.update(username, userInputValues);
+  if (Object.keys(otherValues).length > 0) {
+    throw new ValidationError({
+      message: "Por aqui só se troca o nome de usuário.",
+      action:
+        "A senha se troca em /api/v1/user/password, que pede a senha atual.",
+    });
+  }
+
+  const updatedUser = await user.changeUsername({
+    userId: targetUser.id,
+    newUsername,
+  });
+
+  await auditLog.record({
+    action: "user.username_changed",
+    actorUserId: userTryingToPatch.id,
+    targetUserId: targetUser.id,
+    ip: controller.getClientIp(request),
+  });
 
   const secureOutputValues = authorization.filterOutput(
     userTryingToPatch,
