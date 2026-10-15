@@ -123,12 +123,34 @@ Equipe Menu Spoiler`,
   });
 }
 
+// Alguém tentou criar uma conta com um email que já tem uma. O cadastro
+// responde a essa pessoa o mesmo que a um email novo — ver
+// `pages/api/v1/users` —, e quem fica sabendo é o dono do email.
+async function sendDuplicateAccountNoticeToUser(existingUser) {
+  await email.send({
+    from: "Menu Spoiler <contato@menuspoiler.com.br>",
+    to: existingUser.email,
+    subject: "Tentativa de cadastro com seu email no Menu Spoiler",
+    text: `Olá! Alguém tentou criar uma conta nova no Menu Spoiler com este endereço de email.
+
+Se foi você, a sua conta já existe: é só entrar pelo aplicativo. Se esqueceu a
+senha, use "Esqueci a senha" na tela de entrar.
+
+Se não foi você, nada muda na sua conta. Se quiser, troque a senha por
+precaução.
+
+Atenciosamente,
+Equipe Menu Spoiler`,
+  });
+}
+
 const activation = {
   findOneValidById,
   create,
   markTokenAsUsed,
   activateUserByUserId,
   sendEmailToUser,
+  sendDuplicateAccountNoticeToUser,
   EXPIRATION_IN_MILLISECONDS,
 };
 

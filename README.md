@@ -117,6 +117,16 @@ disso), e cada sessão criada, recusada ou encerrada fica em `audit_logs` — os
 repositório judhagsan. `GET /api/v1/users/[username]` exige sessão e não devolve `features`:
 a lista é o mapa de privilégios da conta, e cada um lê a sua por `GET /api/v1/user`.
 
+### Criar a conta
+
+`POST /api/v1/users` aceita **5 cadastros por IP a cada hora**: cada um manda um email do
+nosso domínio para o endereço que veio no corpo, e sem teto a rota enchia a caixa de
+qualquer um. A resposta é **a mesma** (`201` com uma frase) para o email novo e para o que
+já tem conta, e leva o mesmo tempo — no repetido a senha também passa pelo bcrypt. Quem
+fica sabendo da tentativa é o dono do email, por um aviso, e ela fica em `audit_logs`
+(`user.signup_duplicate_email`). O nome de usuário repetido continua respondendo `400`: o
+nome não é segredo, e sem isso não haveria como escolher outro.
+
 ### Trocar a senha
 
 `PATCH /api/v1/user/password` `{ current_password, password }` troca a senha de quem está

@@ -1,14 +1,34 @@
-import { version as uuidVersion } from "uuid";
 import orchestrator from "tests/orchestrator.js";
 import user from "models/user.js";
 import password from "models/password.js";
+import database from "infra/database.js";
 import webserver from "infra/webserver.js";
+import { NotFoundError } from "infra/errors.js";
 
 beforeAll(async () => {
   await orchestrator.waitForAllServices();
   await orchestrator.clearDatabase();
   await orchestrator.runPendingMigrations();
+  await orchestrator.deleteAllEmails();
 });
+
+// A mesma para o email novo e para o que já tem conta — ver a rota.
+const GENERIC_SIGNUP_RESPONSE = {
+  message:
+    "Se este email ainda não estava cadastrado, enviamos um link de ativação. Verifique sua caixa de entrada.",
+};
+
+async function auditActions(userId) {
+  const result = await database.query({
+    text: `
+      SELECT action FROM audit_logs
+      WHERE actor_user_id = $1 OR target_user_id = $1
+      ORDER BY created_at
+    ;`,
+    values: [userId],
+  });
+  return result.rows.map((row) => row.action);
+}
 
 describe("POST /api/v1/users", () => {
   describe("Anonymous user", () => {
@@ -26,21 +46,13 @@ describe("POST /api/v1/users", () => {
       });
 
       expect(response.status).toBe(201);
-
-      const responseBody = await response.json();
-
-      expect(responseBody).toEqual({
-        id: responseBody.id,
-        username: "menuspoiler",
-        created_at: responseBody.created_at,
-        updated_at: responseBody.updated_at,
-      });
-
-      expect(uuidVersion(responseBody.id)).toBe(4);
-      expect(Date.parse(responseBody.created_at)).not.toBeNaN();
-      expect(Date.parse(responseBody.updated_at)).not.toBeNaN();
+      // A resposta não traz a conta: ela seria diferente da do email
+      // repetido, e a diferença diria quem tem conta aqui.
+      expect(await response.json()).toEqual(GENERIC_SIGNUP_RESPONSE);
 
       const userInDatabase = await user.findOneByUsername("menuspoiler");
+      expect(await auditActions(userInDatabase.id)).toEqual(["user.created"]);
+
       const correctPasswordMatch = await password.compare(
         "senha123",
         userInDatabase.password,
@@ -82,16 +94,28 @@ describe("POST /api/v1/users", () => {
         }),
       });
 
-      expect(response2.status).toBe(400);
+      // Igual ao email novo: quem pergunta não fica sabendo que ele tem conta.
+      expect(response2.status).toBe(201);
+      expect(await response2.json()).toEqual(GENERIC_SIGNUP_RESPONSE);
 
-      const response2Body = await response2.json();
+      // Nenhuma conta nova...
+      const notCreated = await user
+        .findOneByUsername("emailduplicado2")
+        .catch((error) => error);
+      expect(notCreated).toBeInstanceOf(NotFoundError);
 
-      expect(response2Body).toEqual({
-        name: "ValidationError",
-        message: "O email informado já está sendo utilizado.",
-        action: "Utilize outro email para realizar esta operação.",
-        status_code: 400,
-      });
+      // ...e quem fica sabendo é o dono do email.
+      const owner = await user.findOneByEmail("duplicado@menuspoiler.com.br");
+      const lastEmail = await orchestrator.getLastEmail();
+      expect(lastEmail.recipients[0]).toBe("<duplicado@menuspoiler.com.br>");
+      expect(lastEmail.subject).toBe(
+        "Tentativa de cadastro com seu email no Menu Spoiler",
+      );
+      expect(lastEmail.text).not.toContain("emailduplicado");
+      expect(await auditActions(owner.id)).toEqual([
+        "user.created",
+        "user.signup_duplicate_email",
+      ]);
     });
 
     test("With duplicated `username`", async () => {
