@@ -426,6 +426,56 @@ async function findPlaces({ latitude, longitude }) {
   return result.rows;
 }
 
+// Os lugares para onde `userId` mandou cardápio, do envio mais recente para o
+// mais antigo — a aba "Meus cardápios" do aplicativo.
+//
+// O resumo de cada lugar é o do último cardápio que ESTA conta mandou para
+// ele, e não o do que vale: se outra pessoa mandou um depois, a linha continua
+// dizendo o que a conta mandou. Hoje os dois são o mesmo, porque o aplicativo
+// não manda cardápio para um lugar que já tem um.
+//
+// O lugar oculto fica de fora, como na lista de todos: o cardápio dele
+// continua guardado, mas não há mais o lugar no mapa para abri-lo.
+//
+// A conta apagada não chega aqui — sem sessão, não há quem pergunte —, e os
+// cardápios dela continuam valendo para os lugares, na lista de todos.
+//
+// Parte de `menus` pelo índice de `created_by`: o custo é o número de
+// cardápios que a conta mandou.
+async function findPlacesByCreator(userId) {
+  const result = await database.query({
+    text: `
+      ${SELECT_PLACE_WITH_MENU}
+      FROM
+        (
+          SELECT DISTINCT ON (menus.place_id)
+            menus.id,
+            menus.place_id,
+            menus.created_at
+          FROM
+            menus
+          WHERE
+            menus.created_by = $1
+          ORDER BY
+            menus.place_id,
+            menus.created_at DESC,
+            menus.id DESC
+        ) AS latest
+        INNER JOIN places ON places.id = latest.place_id
+      WHERE
+        places.hidden_at IS NULL
+      ORDER BY
+        latest.created_at DESC,
+        places.id
+      LIMIT
+        $2
+    ;`,
+    values: [userId, MAX_PLACES],
+  });
+
+  return result.rows;
+}
+
 // O cardápio com as seções e os pratos dentro, na ordem da folha. Montado no
 // banco: três idas e a junção aqui seriam o mesmo resultado, mais devagar.
 const SELECT_MENU = `
@@ -477,6 +527,7 @@ const menu = {
   create,
   findLatestByPlaceId,
   findPlaces,
+  findPlacesByCreator,
 };
 
 export default menu;
