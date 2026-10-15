@@ -357,12 +357,16 @@ nada: confere-se a forma, e guarda-se.
   de verdade, e o título da seção pode ser vazio.
 - **Dinheiro é inteiro**, em centavos (`price_cents`). Número quebrado volta `400`: é o preço
   em reais mandado no lugar dos centavos.
-- **Cada envio é um cardápio novo.** O que vale para o lugar é o mais recente; os anteriores
+- **Só o primeiro cardápio de cada lugar, por ora.** O que vale é o mais recente, e
+  qualquer conta ativada manda cardápio: sem trava, um `POST` trocava o preço de qualquer
+  lugar do mapa, e ninguém revisa o que chega. Um lugar que já tem cardápio responde `400`.
+  Os lugares que já tinham mais de um continuam valendo pelo mais recente, e os anteriores
   ficam guardados, como registro de quem mandou o quê.
 - **Três tabelas** (`menus`, `menu_sections`, `menu_items`), e não um documento: o produto é
   procurar prato e comparar preço entre lugares.
 
-Mandar exige a feature `create:menu`, que toda conta ativada tem. Ler é público, como o mapa.
+Mandar exige a feature `create:menu`, que toda conta ativada tem, e cada conta manda **no
+máximo 10 cardápios por hora**. Ler é público, como o mapa.
 
 `GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
 (quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e

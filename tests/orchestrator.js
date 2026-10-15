@@ -104,6 +104,35 @@ async function addFeaturesToUser(userObject, features) {
   return updatedUser;
 }
 
+// Um cardápio gravado direto no banco, sem passar pela rota — que recusa um
+// segundo cardápio para o mesmo lugar (ver `menu.create`). É o histórico de
+// antes da trava, que continua no banco e que as leituras ainda precisam
+// tratar. `createdAt` diz se ele é mais velho ou mais novo que o da rota.
+async function insertMenu({ placeId, userId, itemNames, createdAt }) {
+  const result = await database.query({
+    text: `
+      WITH new_menu AS (
+        INSERT INTO menus (place_id, created_by, currency, created_at)
+        VALUES ($1, $2, 'BRL', $3)
+        RETURNING id
+      ),
+      new_section AS (
+        INSERT INTO menu_sections (menu_id, position, title)
+        SELECT id, 0, 'Pratos' FROM new_menu
+        RETURNING id
+      ),
+      new_items AS (
+        INSERT INTO menu_items (section_id, position, name)
+        SELECT new_section.id, item.position - 1, item.name
+        FROM new_section, unnest($4::text[]) WITH ORDINALITY AS item (name, position)
+      )
+      SELECT id FROM new_menu
+    ;`,
+    values: [placeId, userId, createdAt, itemNames],
+  });
+  return result.rows[0].id;
+}
+
 const orchestrator = {
   waitForAllServices,
   clearDatabase,
@@ -115,6 +144,7 @@ const orchestrator = {
   extractUUID,
   activateUser,
   addFeaturesToUser,
+  insertMenu,
 };
 
 export default orchestrator;

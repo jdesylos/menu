@@ -152,8 +152,22 @@ function isLocalhost(ip) {
 
 // Limita quantas vezes um IP chama a rota numa janela — ver
 // `models/rateLimit.js`. Veio do repositório judhagsan, com o mesmo formato.
-function rateLimit({ key, limit, windowMs }) {
+//
+// Com `per: "user"`, a conta é que conta, e não o IP: o que se limita é o que
+// UMA conta faz, de qualquer rede. Vem depois do `canRequest`, que garante que
+// há conta. Sem o atalho de localhost: aqui cada teste tem a sua conta, e o
+// limite não prende o desenvolvimento como o do IP prenderia.
+function rateLimit({ key, limit, windowMs, per = "ip" }) {
   return async function rateLimitMiddleware(request, response, next) {
+    if (per === "user") {
+      await rateLimitModel.check({
+        identifier: `${key}:user:${request.context.user.id}`,
+        limit,
+        windowMs,
+      });
+      return next();
+    }
+
     const ip = getClientIp(request);
 
     // Fora de produção, localhost passa direto: é o que os testes e o

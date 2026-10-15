@@ -290,6 +290,50 @@ describe("POST /api/v1/menus", () => {
     });
 
     // Um cardápio que não passa não deixa metade dele no banco.
+    // Qualquer conta manda cardápio, e o mais recente é o que vale: sem a
+    // trava, um POST trocava o preço de qualquer lugar do mapa.
+    test("With a place that already has a menu", async () => {
+      const placeId = await createPlace("Bar que Já Tem");
+      const first = await send(menuFor(placeId), await sessionFor());
+      expect(first.status).toBe(201);
+
+      const { status, body } = await send(menuFor(placeId), await sessionFor());
+
+      expect(status).toBe(400);
+      expect(body).toEqual({
+        name: "ValidationError",
+        message: "Este lugar já tem cardápio.",
+        action: "Abra o cardápio dele pelo mapa.",
+        status_code: 400,
+      });
+      const stored = await database.query({
+        text: "SELECT count(*)::int AS total FROM menus WHERE place_id = $1;",
+        values: [placeId],
+      });
+      expect(stored.rows[0].total).toBe(1);
+    });
+
+    // Dez por hora, por conta — e não por IP: o teste roda em localhost, que o
+    // limite por IP deixa passar, e é a conta que se quer conter.
+    test("Past the limit of the account", async () => {
+      const sessionObject = await sessionFor();
+      for (let i = 0; i < 10; i++) {
+        const placeId = await createPlace(`Bar do Limite ${i}`);
+        const { status } = await send(menuFor(placeId), sessionObject);
+        expect(status).toBe(201);
+      }
+
+      const placeId = await createPlace("Bar do Limite Passado");
+      const { status, body } = await send(menuFor(placeId), sessionObject);
+
+      expect(status).toBe(429);
+      expect(body.name).toBe("RateLimitError");
+
+      // Outra conta, do mesmo IP, continua mandando.
+      const other = await send(menuFor(placeId), await sessionFor());
+      expect(other.status).toBe(201);
+    });
+
     test("A rejected menu leaves nothing behind", async () => {
       const placeId = await createPlace("Bar do Meio Caminho");
       const sessionObject = await sessionFor();

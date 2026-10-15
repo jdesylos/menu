@@ -9,6 +9,19 @@ import { NotFoundError, ValidationError } from "infra/errors.js";
 // O aplicativo manda o cardápio JÁ ESTRUTURADO, depois de a pessoa conferir na
 // tela de revisão. Aqui não se lê foto nem se extrai nada: confere-se a forma,
 // e guarda-se.
+//
+// # Só o primeiro cardápio de cada lugar, por ora
+//
+// O que vale para o lugar é o mais recente, e qualquer conta ativada manda
+// cardápio: sem esta trava, uma conta trocava o preço de qualquer lugar do
+// mapa com um POST, e ninguém revisa o que chega. O aplicativo já não oferece
+// mandar para um lugar que tem cardápio; a API passa a recusar igual. Atualizar
+// o cardápio de um lugar volta quando houver quem revise.
+//
+// Os lugares que já têm mais de um, de antes desta trava, continuam valendo
+// pelo mais recente. E duas contas mandando o PRIMEIRO cardápio do mesmo lugar
+// no mesmo instante passam as duas: a conferência e a gravação são uma
+// instrução só, mas cada uma vê o banco de quando começou.
 
 const CURRENCIES = ["BRL", "USD", "EUR"];
 
@@ -34,8 +47,17 @@ async function create(user, input) {
       WITH new_menu AS (
         INSERT INTO
           menus (place_id, created_by, currency)
-        VALUES
-          ($1, $2, $3)
+        SELECT
+          $1, $2, $3
+        WHERE
+          NOT EXISTS (
+            SELECT
+              1
+            FROM
+              menus
+            WHERE
+              menus.place_id = $1
+          )
         RETURNING
           id
       ),
@@ -87,6 +109,13 @@ async function create(user, input) {
       JSON.stringify(values.items),
     ],
   });
+
+  if (result.rowCount === 0) {
+    throw new ValidationError({
+      message: "Este lugar já tem cardápio.",
+      action: "Abra o cardápio dele pelo mapa.",
+    });
+  }
 
   // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
   // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio

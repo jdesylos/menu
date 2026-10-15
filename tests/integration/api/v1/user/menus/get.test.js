@@ -133,12 +133,18 @@ describe("GET /api/v1/user/menus", () => {
       expect(cacheControl).toContain("no-store");
     });
 
-    // Um lugar, uma linha: a do último envio da conta para ele.
+    // Um lugar, uma linha: a do último envio da conta para ele. O mais velho
+    // entra direto no banco — a rota não aceita mais um segundo cardápio.
     test("With two menus sent to the same place", async () => {
       const sessionObject = await sessionForActivatedUser();
       const placeId = await createPlace("Bar Mandado Duas Vezes");
-      await send(placeId, ["Antigo"], sessionObject);
       const newest = await send(placeId, ["Novo", "Novo 2"], sessionObject);
+      await orchestrator.insertMenu({
+        placeId,
+        userId: sessionObject.user_id,
+        itemNames: ["Antigo"],
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
 
       const { body } = await mine(sessionObject.token);
 
@@ -147,14 +153,20 @@ describe("GET /api/v1/user/menus", () => {
       expect(body.places[0].menu.items).toBe(2);
     });
 
-    // Outra pessoa mandou depois: o lugar continua na aba, com o que a conta
-    // mandou, e não com o cardápio que vale agora.
+    // Outra pessoa mandou depois — antes da trava, ou quando atualizar voltar
+    // a existir: o lugar continua na aba, com o que a conta mandou, e não com
+    // o cardápio que vale agora.
     test("With a menu sent later by someone else", async () => {
       const sessionObject = await sessionForActivatedUser();
       const someoneElse = await sessionForActivatedUser();
       const placeId = await createPlace("Bar que Outra Pessoa Atualizou");
       const own = await send(placeId, ["Meu prato"], sessionObject);
-      await send(placeId, ["Prato novo", "Outro novo"], someoneElse);
+      await orchestrator.insertMenu({
+        placeId,
+        userId: someoneElse.user_id,
+        itemNames: ["Prato novo", "Outro novo"],
+        createdAt: new Date(Date.now() + 60 * 1000),
+      });
 
       const { body } = await mine(sessionObject.token);
 
