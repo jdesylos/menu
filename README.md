@@ -386,6 +386,12 @@ chave que `GET /api/v1/vision/key` entrega. Essa rota exige **sessão de uma con
 `create:menu`**, além do token do aplicativo (`x-vision-token`) — sem conta, não há leitura.
 Ela se desliga sozinha quando falta `GEMINI_API_KEY` ou `VISION_TOKEN` no ambiente.
 
+O token viaja dentro do aplicativo e sai dele com `strings`: quem tem uma conta ativada e o
+aplicativo tem a chave. Por isso cada entrega fica em `audit_logs` (`vision.key_delivered`,
+com a conta e o IP), e cada conta pega a chave no máximo 20 vezes por hora. O limite não
+impede um vazamento — uma entrega basta —; o que limita o estrago é o **teto de gasto na
+conta do provedor**.
+
 ## Deploy
 
 O banco fica na **Neon** e a API na **Vercel**. Em ambos, entre com **"Continue with
