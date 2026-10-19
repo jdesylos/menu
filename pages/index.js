@@ -1,4 +1,5 @@
 import Head from "next/head";
+import Link from "next/link";
 import localFont from "next/font/local";
 
 // A home é PROVISÓRIA: uma tela só, que diz o que o Menu Spoiler é e que ele
@@ -74,6 +75,10 @@ export default function Home() {
         <footer className="rodape">
           <span>JBS Design e Marketing Ltda</span>
           <span>CNPJ 67.260.094/0001-09</span>
+          <nav className="links" aria-label="Páginas do Menu Spoiler">
+            <Link href="/privacidade">Termos e privacidade</Link>
+            <Link href="/conta/apagar">Apagar a conta</Link>
+          </nav>
         </footer>
       </main>
 
@@ -220,6 +225,19 @@ export default function Home() {
           gap: 2px 20px;
           font-size: 0.875rem;
           line-height: 1.4;
+        }
+
+        /* Os dois links quebram juntos: no celular, um não fica sozinho na
+           linha de baixo. */
+        .links {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 2px 20px;
+        }
+
+        .links :global(a) {
+          color: var(--tinta);
+          font-weight: 600;
         }
 
         /* Em tela larga, o texto fica à esquerda e a folha ao lado dele. */

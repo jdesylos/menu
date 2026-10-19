@@ -1,0 +1,71 @@
+Estes termos regulam o uso do aplicativo Menu Spoiler. Para criar uma conta, é preciso lê-los e aceitá-los. O responsável pelo aplicativo é JBS DESIGN E MARKETING LTDA, CNPJ 67.260.094/0001-09.
+
+Se os termos mudarem, avisaremos pelo email da sua conta. Quem não concordar com a nova versão deve deixar de usar o aplicativo.
+
+# O que coletamos
+
+- Cadastro: nome de usuário, email e senha. A senha é guardada criptografada, nunca em texto puro.
+- Sessão: um identificador aleatório que mantém você conectado, com data de criação e de validade.
+- Ativação: um link temporário, enviado por email, para confirmar o cadastro.
+- Localização: usada para abrir o mapa perto de você. A última posição fica guardada só no seu aparelho, para o mapa abrir mais rápido. Quando você busca um lugar, a posição vai junto, para ordenar os resultados por distância.
+- Fotos de cardápio: a câmera só é usada quando você fotografa um cardápio. A foto vai do aparelho ao nosso servidor, que a entrega ao Google (Gemini), um serviço de inteligência artificial que lê o texto dela. O nosso servidor não guarda a foto: ela existe nele só enquanto é lida.
+- Cardápios enviados: o cardápio que você confere e envia (os pratos, as descrições e os preços) fica guardado no nosso servidor, ligado à sua conta, e é mostrado a todos que usam o aplicativo.
+- Sugestões: o que você sugerir sobre um lugar do mapa fica ligado à sua conta, para quem modera poder avaliar.
+- Registros do servidor: endereço IP e dados técnicos das requisições, guardados pelo provedor de hospedagem por segurança.
+- Anúncios: no Android, o aplicativo mostra um banner do Google (AdMob) na tela do mapa. Os anúncios não são personalizados: o aplicativo não entrega ao Google o identificador de publicidade do aparelho nem os tópicos de interesse dele. Para mostrar o anúncio e evitar fraude, o Google recebe dados técnicos do pedido, como o endereço IP, o modelo e o sistema do aparelho, o idioma e o toque no anúncio.
+
+# Para que usamos
+
+- Criar sua conta, autenticar você e manter a sessão.
+- Enviar o email de ativação.
+- Mostrar o mapa, a busca e os lugares perto de você.
+- Ler as fotos de cardápio que você fotografa.
+- Mostrar os cardápios dos lugares a quem usa o aplicativo.
+- Mostrar anúncios, que ajudam a manter o aplicativo gratuito.
+- Proteger o serviço contra fraude e abuso.
+
+# Base legal
+
+- Consentimento: dado no cadastro, ao aceitar estes termos.
+- Execução de contrato: para prestar o serviço que você pediu.
+- Legítimo interesse: para a segurança da operação e a prevenção de fraude.
+
+# Com quem compartilhamos
+
+Não vendemos seus dados. Eles passam apenas pelos provedores necessários para o serviço funcionar, e parte deles funciona fora do Brasil:
+
+- Vercel: hospedagem do servidor.
+- Neon: banco de dados.
+- Google (Gemini): leitura das fotos de cardápio. Usamos o plano pago da API do Gemini, em que o Google não usa a foto para melhorar os produtos dele; ele a guarda por tempo limitado, só para detectar abuso.
+- Resend: envio do email de ativação.
+- Google (AdMob): o banner de anúncios. O Google trata esses dados também conforme a política de privacidade dele.
+
+# Por quanto tempo guardamos
+
+- Link de ativação: 15 minutos.
+- Sessão: 30 dias desde o último uso.
+- Conta: enquanto ela existir. Quando você apaga a conta, o nome de usuário, o email, a senha e as sessões são apagados na hora.
+- Cardápios enviados e sugestões: não são apagados junto com a conta. Eles continuam no aplicativo, sem ligação com você: o cardápio é do lugar, e não de quem o enviou.
+- Registros do servidor: pelo prazo padrão do provedor de hospedagem.
+
+# Segurança
+
+- A senha é guardada criptografada, nunca em texto puro.
+- Toda comunicação entre o aparelho e os servidores é criptografada.
+- Os identificadores de sessão são gerados de forma aleatória.
+
+# Seus direitos
+
+Pela LGPD, você pode pedir acesso, correção, portabilidade ou exclusão dos seus dados, e revogar este aceite.
+
+Para apagar a conta, entre nela, toque no seu nome na tela inicial e escolha "Apagar conta". Seus dados pessoais são apagados na hora, e não dá para desfazer.
+
+Apagar a conta não apaga os cardápios que você enviou. Eles continuam no aplicativo e continuam sendo mostrados a todos, sem o seu nome e sem ligação com você. Se quiser que um cardápio seu saia do aplicativo, peça pelo contato abaixo antes de apagar a conta: depois dela, não temos mais como saber quais eram os seus.
+
+Para qualquer outro pedido, use o contato abaixo.
+
+# Contato
+
+Responsável pelos dados: JBS DESIGN E MARKETING LTDA.
+
+Email: contato@menuspoiler.com.br
