@@ -112,6 +112,12 @@ trap 'rm -f "$CSV" "$FECHADOS" "$DUPLICADOS"' EXIT
 #   igual, ou um contém o outro. As duas fontes escrevem o mesmo lugar de jeitos
 #   diferentes: "Old Dog Dogueria" e "Old Dog", "Mezzo Steakhouse e Café" e
 #   "Mezzo Steakhouse".
+# - "Burguer" e "burger" são a mesma palavra. Cada fonte escolhe a grafia por
+#   si, e o Brasil Burguer da Raul Saddi, no Butantã, fechado em 2020 no
+#   Foursquare como "Brasil Burger", ficava no mapa por isso. A troca é só no
+#   FIM da palavra: dentro dela, "hamburgueria" virava "hamburgeria", que
+#   contém "burger", e um "Burger+" aberto a 66 m segurava no mapa o Chef Rocks
+#   Hamburgueria, que fechou.
 # - Ele SAI só quando algum par é fechado e NENHUM par é aberto. Na dúvida, o
 #   lugar fica: esconder um restaurante que existe é pior do que mostrar um que
 #   fechou.
@@ -127,8 +133,16 @@ trap 'rm -f "$CSV" "$FECHADOS" "$DUPLICADOS"' EXIT
 # cinco que a regra tira foram conferidos em fontes independentes: nenhum
 # estava aberto com aquele nome e endereço.
 #
+# A grafia do "burguer", medida nos mesmos releases, tirou mais 31 lugares —
+# todos com o mesmo nome nas duas fontes a menos dela, e a até 51 m — e
+# devolveu 11 ao mapa: os que o Foursquare tem fechados E abertos, como o
+# Burger King da Av. Atlântica, em Balneário Camboriú, fechado como "Burger
+# King" e aberto como "Burguer King Praia". É a regra de cima: na dúvida, fica.
+#
 # O limite: 68% dos lugares não têm par no Foursquare, e sobre eles esta regra
-# não diz nada.
+# não diz nada. E só o "burguer" tem a grafia corrigida, e só no fim da
+# palavra — "Burguer2Go" e "Burger 2Go" continuam sem par. Outras grafias que
+# as duas fontes escrevam diferente não foram procuradas.
 if [ -n "${HF_TOKEN:-}" ]; then
     FECHADOS_SQL="
 CREATE SECRET hf (TYPE huggingface, TOKEN '$HF_TOKEN');
@@ -151,7 +165,12 @@ WHERE bbox.xmin BETWEEN $OESTE AND $LESTE
     ['Dining and Drinking']
   );
 
-CREATE MACRO normalizado(s) AS regexp_replace(lower(strip_accents(s)), '[^a-z0-9]', '', 'g');
+-- O burguer vira burger antes de sair a pontuação, que é o que marca o fim
+-- da palavra. O porquê está no comentário do shell, acima de FECHADOS_SQL.
+CREATE MACRO normalizado(s) AS regexp_replace(
+  regexp_replace(lower(strip_accents(s)), 'burguer\b', 'burger', 'g'),
+  '[^a-z0-9]', '', 'g'
+);
 
 -- Palavras que, sozinhas, não identificam lugar nenhum.
 CREATE TEMP TABLE genericos AS SELECT unnest([
