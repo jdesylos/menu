@@ -1,4 +1,5 @@
 import database from "infra/database.js";
+import cdn from "infra/cdn.js";
 import authorization from "models/authorization.js";
 import place from "models/place.js";
 import {
@@ -310,10 +311,10 @@ async function review(user, id, status) {
       });
     }
 
-    const placeId =
+    const applied =
       status === "accepted"
         ? await apply(client, suggestion)
-        : suggestion.place_id;
+        : { placeId: suggestion.place_id, positions: [] };
 
     const updated = await client.query({
       text: `
@@ -330,10 +331,23 @@ async function review(user, id, status) {
         RETURNING
           *
       ;`,
-      values: [id, status, placeId, user.id],
+      values: [id, status, applied.placeId, user.id],
     });
 
     await client.query("COMMIT");
+
+    // O tile guarda na borda, por uma hora, os lugares que tinha — ver a rota
+    // `places/[z]/[x]/[y]`. Sem isto, a sugestão aceita só chegava ao mapa
+    // quando a cópia vencesse: o Queijo e Carne Burger, cadastrado por
+    // sugestão na Raul Saddi, ficou de fora até lá, e o Brasil Burguer, que
+    // outra sugestão fechou, continuou no lugar dele.
+    //
+    // Depois do COMMIT, e não antes: apagar antes deixaria a função refazer o
+    // tile ainda com o dado velho, e a borda o guardaria por mais uma hora.
+    if (applied.positions.length > 0) {
+      cdn.forget(cacheTagsOf(applied.positions));
+    }
+
     return updated.rows[0];
   } catch (error) {
     await client.query("ROLLBACK");
@@ -344,7 +358,8 @@ async function review(user, id, status) {
 }
 
 // O que cada tipo aceito faz no lugar. Devolve o id do lugar — no `create`, o
-// do lugar que acabou de nascer.
+// do lugar que acabou de nascer — e as posições cujo tile mudou: a de onde
+// ele está e, na correção que o move, também a de onde ele saiu.
 async function apply(client, suggestion) {
   const changes = suggestion.changes;
 
@@ -359,7 +374,7 @@ async function apply(client, suggestion) {
         VALUES
           ('usuario', $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING
-          id
+          id, latitude, longitude
       ;`,
       values: [
         suggestion.id,
@@ -374,7 +389,7 @@ async function apply(client, suggestion) {
         changes.region ?? null,
       ],
     });
-    return created.rows[0].id;
+    return { placeId: created.rows[0].id, positions: created.rows };
   }
 
   if (suggestion.kind === "update") {
@@ -384,7 +399,14 @@ async function apply(client, suggestion) {
     const fields = Object.keys(changes);
     const assignments = fields.map((field, i) => `${field} = $${i + 3}`);
 
-    await client.query({
+    // Onde ele estava, antes de a correção movê-lo: o tile de lá também
+    // muda, porque o lugar sai dele.
+    const before = await client.query({
+      text: "SELECT latitude, longitude FROM places WHERE id = $1 FOR UPDATE;",
+      values: [suggestion.place_id],
+    });
+
+    const after = await client.query({
       text: `
         UPDATE
           places
@@ -394,6 +416,8 @@ async function apply(client, suggestion) {
           updated_at = timezone('utc', now())
         WHERE
           id = $1
+        RETURNING
+          latitude, longitude
       ;`,
       values: [
         suggestion.place_id,
@@ -401,13 +425,16 @@ async function apply(client, suggestion) {
         ...fields.map((field) => changes[field]),
       ],
     });
-    return suggestion.place_id;
+    return {
+      placeId: suggestion.place_id,
+      positions: [...before.rows, ...after.rows],
+    };
   }
 
   const reason =
     suggestion.kind === "close" ? "reported_closed" : "reported_duplicate";
 
-  await client.query({
+  const hidden = await client.query({
     text: `
       UPDATE
         places
@@ -418,10 +445,19 @@ async function apply(client, suggestion) {
         updated_at = timezone('utc', now())
       WHERE
         id = $1
+      RETURNING
+        latitude, longitude
     ;`,
     values: [suggestion.place_id, reason, suggestion.duplicate_of],
   });
-  return suggestion.place_id;
+  return { placeId: suggestion.place_id, positions: hidden.rows };
+}
+
+// As etiquetas dos tiles dessas posições, sem repetir: a correção que só
+// troca o nome deixa o lugar no mesmo tile, e as duas posições dela dão as
+// mesmas etiquetas.
+function cacheTagsOf(positions) {
+  return [...new Set(positions.flatMap(place.cacheTagsOf))];
 }
 
 function suggestionNotFound() {
