@@ -445,7 +445,18 @@ FROM lugares
 WHERE source_id NOT IN (SELECT source_id FROM fechados);
 
 -- Cada par a menos de 30 m, e se ele casa por uma das duas regras. A grade de
--- 0,0003 grau (uns 33 m) é o que evita comparar tudo com tudo.
+-- 0,0003 grau (uns 33 m) é o que evita comparar tudo com tudo: cada lugar
+-- entra nas nove células em volta da sua, e o par se acha por IGUALDADE de
+-- célula, como na regra do Foursquare.
+--
+-- Comparar a distância entre as células, com abs(a.cy - b.cy) menor ou igual
+-- a 1, dá os mesmos pares, mas o DuckDB não junta por ela: forma todos os
+-- pares do país pelo id e só filtra depois. Na caixa da cidade de São Paulo
+-- isso passava. No país inteiro, a carga de 21/10/2026 calculou 46 minutos
+-- sem sair da extração e foi interrompida. A junção sozinha, medida com os
+-- lugares de comer do Brasil no release 2026-09-23.0: num recorte de 15.872
+-- lugares em São Paulo, 1,8 s pela distância e 0,03 s pela igualdade, com os
+-- mesmos 60.395 pares; no país inteiro, 0,15 s pela igualdade.
 CREATE TEMP TABLE pares_dup AS
 WITH perto AS (
   SELECT
@@ -467,10 +478,13 @@ WITH perto AS (
     a.numero <> '' AND a.numero = b.numero AND list_has_any(a.palavras, b.palavras)
       AS mesma_porta
   FROM candidatos a
-  JOIN candidatos b
-    ON a.source_id < b.source_id
-    AND abs(a.cy - b.cy) <= 1
-    AND abs(a.cx - b.cx) <= 1
+  JOIN (
+    SELECT candidatos.*, cy + dy AS vy, cx + dx AS vx
+    FROM candidatos, (SELECT unnest([-1, 0, 1]) AS dy), (SELECT unnest([-1, 0, 1]) AS dx)
+  ) b
+    ON a.cy = b.vy
+    AND a.cx = b.vx
+    AND a.source_id < b.source_id
   WHERE 6371000 * 2 * asin(sqrt(
       pow(sin(radians(b.latitude - a.latitude) / 2), 2)
       + cos(radians(a.latitude)) * cos(radians(b.latitude))
