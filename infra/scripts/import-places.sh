@@ -572,12 +572,30 @@ SET
 FROM complemento c
 WHERE lugares.source_id = c.source_id;
 
+-- Todo texto vai numa linha só: a quebra de dentro do campo vira vírgula, e a
+-- das pontas some. O import-places.mjs lê o CSV linha a linha, e o endereço
+-- com quebra de linha virava dois pedaços inválidos: o lugar não entrava, e a
+-- carga o ocultava como sumido do Overture. Na carga de 21/10/2026 foram três
+-- — o "Avenida Santo Antônio S" com a quebra no fim, da Casa do Milk Shake, em
+-- Campo Maior, e dois com a quebra no meio. Vírgula, e não espaço, porque a
+-- segunda linha costuma ser outra parte do endereço, como o bairro do
+-- quiosque da Nespresso em São José dos Campos. O espaço que não quebra
+-- (U+00A0) conta como espaço: ele vinha logo depois da quebra, nesse
+-- quiosque, e o \s da expressão não o reconhece.
+CREATE MACRO uma_linha(s) AS regexp_replace(
+  trim(s, ' ' || chr(9) || chr(10) || chr(13) || chr(160)),
+  '[\s\x{00A0}]*[\r\n]+[\s\x{00A0}]*', ', ', 'g'
+);
+
 -- O que fechou e o que é duplicata não entram no CSV, e o import-places.mjs os
 -- oculta se já estavam no banco: o upsert sozinho só acrescenta e atualiza.
 COPY (
   SELECT
-    source_id, name, category, latitude, longitude,
-    neighborhood, street, postcode, locality, region
+    source_id, uma_linha(name) AS name, uma_linha(category) AS category,
+    latitude, longitude,
+    uma_linha(neighborhood) AS neighborhood, uma_linha(street) AS street,
+    uma_linha(postcode) AS postcode, uma_linha(locality) AS locality,
+    uma_linha(region) AS region
   FROM lugares
   WHERE source_id NOT IN (SELECT source_id FROM fechados)
     AND source_id NOT IN (SELECT source_id FROM duplicados)
