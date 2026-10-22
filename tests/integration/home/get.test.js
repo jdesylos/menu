@@ -17,6 +17,9 @@ describe("GET /", () => {
 
       expect(responseBody).toContain("O cardápio antes de você chegar.");
       expect(responseBody).toContain("Em breve para Android e iOS.");
+      expect(responseBody).toContain(
+        'href="mailto:contato@menuspoiler.com.br"',
+      );
       expect(responseBody).toContain('href="/privacidade"');
       expect(responseBody).toContain('href="/conta/apagar"');
     });

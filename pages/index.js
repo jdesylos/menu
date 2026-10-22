@@ -26,6 +26,9 @@ const TITULO = "O cardápio antes de você chegar.";
 const DESCRICAO =
   "Um aplicativo que mostra os pratos e os preços dos lugares perto de você. E se o cardápio ainda não estiver lá, é só fotografar.";
 const LOJAS = "Em breve para Android e iOS.";
+// O contato fica à vista na home porque ela é a URL de suporte das lojas: a
+// Apple pede que a página de suporte dê um jeito de falar com quem publica.
+const CONTATO = "contato@menuspoiler.com.br";
 
 // A folha é ilustração: três linhas de cardápio, com o preço escondido atrás
 // de uma tarja que sai sozinha — o "spoiler" do nome. Não vem do banco, e por
@@ -75,6 +78,12 @@ export default function Home() {
         <footer className="rodape">
           <span>JBS Design e Marketing Ltda</span>
           <span>CNPJ 67.260.094/0001-09</span>
+          <span>
+            Suporte:{" "}
+            <a className="contato" href={`mailto:${CONTATO}`}>
+              {CONTATO}
+            </a>
+          </span>
           <nav className="links" aria-label="Páginas do Menu Spoiler">
             <Link href="/privacidade">Termos e privacidade</Link>
             <Link href="/conta/apagar">Apagar a conta</Link>
@@ -235,6 +244,7 @@ export default function Home() {
           gap: 2px 20px;
         }
 
+        .contato,
         .links :global(a) {
           color: var(--tinta);
           font-weight: 600;
