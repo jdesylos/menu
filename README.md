@@ -357,16 +357,42 @@ nada: confere-se a forma, e guarda-se.
   de verdade, e o título da seção pode ser vazio.
 - **Dinheiro é inteiro**, em centavos (`price_cents`). Número quebrado volta `400`: é o preço
   em reais mandado no lugar dos centavos.
-- **Só o primeiro cardápio de cada lugar, por ora.** O que vale é o mais recente, e
-  qualquer conta ativada manda cardápio: sem trava, um `POST` trocava o preço de qualquer
-  lugar do mapa, e ninguém revisa o que chega. Um lugar que já tem cardápio responde `400`.
-  Os lugares que já tinham mais de um continuam valendo pelo mais recente, e os anteriores
-  ficam guardados, como registro de quem mandou o quê.
+- **O que vale é o mais recente**, e cada envio é um cardápio novo: os anteriores ficam
+  guardados, como registro de quem mandou o quê. Mandar um cardápio para um lugar que já tem
+  um, sem dizer qual ele substitui, responde `400`.
 - **Três tabelas** (`menus`, `menu_sections`, `menu_items`), e não um documento: o produto é
   procurar prato e comparar preço entre lugares.
 
 Mandar exige a feature `create:menu`, que toda conta ativada tem, e cada conta manda **no
 máximo 10 cardápios por hora**. Ler é público, como o mapa.
+
+`GET /api/v1/menus?place_id=` devolve o cardápio que vale, com o `id` de cada prato,
+`place_location` (onde fica o lugar, de onde o aplicativo mede o raio de quem fotografa) e
+`can_edit`: se a conta da sessão pode mudar o texto dele — só quem o mandou. Sem sessão, é
+`false`. Quem mandou não sai na resposta.
+
+#### Trocar o cardápio que vale
+
+É o mesmo `POST`, dizendo em `replaces` qual cardápio ele substitui — o `id` que a leitura
+devolveu. Sem trava nenhuma, um `POST` trocava o preço de qualquer lugar do mapa, e ninguém
+revisa o que chega; por isso a troca tem dois caminhos:
+
+- **Fotografando no lugar**: o pedido leva `position` (`latitude`, `longitude` e
+  `accuracy_m`, o erro do GPS em metros), e quem está a **até 100 m** do ponto do lugar —
+  descontado o erro, que conta a seu favor — troca o que quiser, de qualquer conta. Leitura
+  com mais de 100 m de erro não conta: é a localização aproximada, e com ela qualquer um
+  estaria no raio.
+- **Sem fotografar**: só quem mandou o cardápio que vale, e só o texto. Cada prato volta com
+  o `id` que tinha, todos voltam, e nenhum entra.
+
+Fora disso, `403`, com a frase do que faltou. Se o cardápio de `replaces` já não é o que vale
+— alguém trocou antes —, `409`, e nada é gravado. A troca fica em `audit_logs`
+(`menu.replace`), e o cardápio novo guarda de qual saiu (`replaces_menu_id`) e a que
+distância do lugar estava quem fotografou (`distance_m`) — a posição em si não é guardada.
+É o que permite voltar atrás numa troca que não devia ter acontecido: a posição vem do
+aparelho, e um GPS falso passa.
+
+O primeiro cardápio de um lugar não pede posição.
 
 `GET /api/v1/menus/places` lista os lugares que têm cardápio, com o resumo do que vale
 (quantos pratos, de quando é) — é o que o botão "Cardápios" do aplicativo abre. Com `lat` e
@@ -375,12 +401,12 @@ máximo 10 cardápios por hora**. Ler é público, como o mapa.
 `GET /api/v1/user/menus` é a mesma lista, só com os lugares para onde a conta da sessão
 mandou cardápio — a aba "Meus cardápios" do aplicativo. Do envio mais recente para o mais
 antigo, um lugar por linha, e o resumo é o do último cardápio que **a conta** mandou para
-ele, mesmo que outra pessoa tenha mandado um depois. Apagar a conta não apaga os cardápios
+ele, mesmo que outra pessoa o tenha trocado depois. Apagar a conta não apaga os cardápios
 dela: eles continuam valendo para os lugares, na lista de todos.
 
 E cada lugar do tile (`GET /api/v1/places/[z]/[x]/[y]`) traz `has_menu`: o aplicativo pinta
 de verde o marcador de quem tem cardápio. O tile fica uma hora na borda, e por isso guardar
-um cardápio **apaga de lá os tiles do lugar**, de z14 a z18: a resposta do tile leva a
+o primeiro cardápio de um lugar **apaga de lá os tiles dele**, de z14 a z18: a resposta do tile leva a
 etiqueta dele no cabeçalho `Vercel-Cache-Tag`, e `menu.create` pede a purga por
 `infra/cdn.js`. Sem isso o lugar aparecia na lista de cardápios, que não passa pela borda, e
 seguia sem cor no mapa. Fora da Vercel não há borda, e a purga não faz nada.

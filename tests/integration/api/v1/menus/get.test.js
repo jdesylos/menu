@@ -45,9 +45,12 @@ async function send(placeId, itemName, sessionObject) {
   return await response.json();
 }
 
-async function read(placeId) {
+async function read(placeId, sessionObject) {
   const response = await fetch(
     `${webserver.origin}/api/v1/menus?place_id=${encodeURIComponent(placeId)}`,
+    sessionObject
+      ? { headers: { Cookie: `session_id=${sessionObject.token}` } }
+      : undefined,
   );
   return {
     status: response.status,
@@ -75,18 +78,25 @@ describe("GET /api/v1/menus", () => {
           {
             title: "Pratos",
             items: [
-              { name: "Parmegiana", ingredients: null, price_cents: 3500 },
+              {
+                id: sent.sections[0].items[0].id,
+                name: "Parmegiana",
+                ingredients: null,
+                price_cents: 3500,
+              },
             ],
           },
         ],
+        can_edit: false,
+        place_location: { latitude: -23.5505, longitude: -46.6333 },
       });
       // Quem acabou de mandar espera ver o que mandou.
       expect(cacheControl).toContain("no-store");
     });
 
-    // Cada envio é um cardápio novo, e o que vale é o mais recente. A rota
-    // não aceita mais um segundo — ver `menu.create` —, e o mais velho entra
-    // direto no banco: é o histórico de antes da trava.
+    // Cada envio é um cardápio novo, e o que vale é o mais recente. O mais
+    // velho entra direto no banco, com a data no passado; a troca pela rota
+    // é do post.test.js.
     test("With a place that received two menus", async () => {
       const placeId = await createPlace("Bar que Mudou o Cardápio");
       const sessionObject = await sessionForActivatedUser();
@@ -134,6 +144,53 @@ describe("GET /api/v1/menus", () => {
       const response = await fetch(`${webserver.origin}/api/v1/menus`);
 
       expect(response.status).toBe(404);
+    });
+  });
+
+  // Quem mandou pode mudar o texto de onde estiver; quem não mandou, não —
+  // ver `menu.canEditText`. É o que o aplicativo pergunta para mostrar o
+  // botão de editar.
+  describe("Default user", () => {
+    test("Who sent the menu", async () => {
+      const placeId = await createPlace("Bar de Quem Mandou");
+      const sessionObject = await sessionForActivatedUser();
+      await send(placeId, "Bife a cavalo", sessionObject);
+
+      const { status, body } = await read(placeId, sessionObject);
+
+      expect(status).toBe(200);
+      expect(body.can_edit).toBe(true);
+    });
+
+    test("Who did not send the menu", async () => {
+      const placeId = await createPlace("Bar de Outra Conta");
+      await send(placeId, "Picadinho", await sessionForActivatedUser());
+
+      const { status, body } = await read(
+        placeId,
+        await sessionForActivatedUser(),
+      );
+
+      expect(status).toBe(200);
+      expect(body.can_edit).toBe(false);
+    });
+
+    // O mais recente é o que vale, e é dele que se pergunta: quem mandou um
+    // cardápio antigo do lugar não edita o de outra pessoa.
+    test("Who sent an older menu of the place", async () => {
+      const placeId = await createPlace("Bar do Cardápio Antigo");
+      const older = await sessionForActivatedUser();
+      await send(placeId, "Prato novo", await sessionForActivatedUser());
+      await orchestrator.insertMenu({
+        placeId,
+        userId: older.user_id,
+        itemNames: ["Prato antigo"],
+        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      });
+
+      const { body } = await read(placeId, older);
+
+      expect(body.can_edit).toBe(false);
     });
   });
 });

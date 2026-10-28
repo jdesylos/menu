@@ -81,6 +81,28 @@ export class NotFoundError extends Error {
   }
 }
 
+// O pedido partiu de um estado que não existe mais: o cardápio que a pessoa
+// editou deixou de ser o que vale enquanto ela editava.
+export class ConflictError extends Error {
+  constructor({ cause, message, action }) {
+    super(message || "O recurso mudou desde que foi lido.", {
+      cause,
+    });
+    this.name = "ConflictError";
+    this.action = action || "Leia o recurso de novo e refaça a mudança.";
+    this.statusCode = 409;
+  }
+
+  toJSON() {
+    return {
+      name: this.name,
+      message: this.message,
+      action: this.action,
+      status_code: this.statusCode,
+    };
+  }
+}
+
 export class ForbiddenError extends Error {
   constructor({ cause, message, action }) {
     super(message || "Acesso negado.", {

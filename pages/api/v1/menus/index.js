@@ -1,5 +1,6 @@
 import { createRouter } from "next-connect";
 import controller from "infra/controller.js";
+import auditLog from "models/auditLog.js";
 import authorization from "models/authorization.js";
 import menu from "models/menu.js";
 
@@ -11,8 +12,12 @@ import menu from "models/menu.js";
 //
 // Ler é público, como o mapa: saber o prato e o preço antes de chegar é o
 // produto, e não pede conta. Mandar pede `create:menu`, e cada conta manda no
-// máximo dez cardápios por hora: ninguém revisa o que chega, e cada envio
-// ainda apaga cinco tiles da borda.
+// máximo dez cardápios por hora, contando as trocas: ninguém revisa o que
+// chega, e o primeiro cardápio de um lugar ainda apaga cinco tiles da borda.
+//
+// Trocar o cardápio que vale é o mesmo POST, com `replaces` — quem pode, e o
+// quê, está em `menu.create`. Cada troca fica em `audit_logs`
+// (`menu.replace`), com a conta e o IP.
 export default createRouter()
   .use(controller.shareDatabaseConnection)
   .use(controller.injectAnonymousOrUser)
@@ -35,6 +40,14 @@ async function postHandler(request, response) {
   const userTryingToCreate = request.context.user;
   const created = await menu.create(userTryingToCreate, request.body);
 
+  if (created.replaces_menu_id) {
+    await auditLog.record({
+      action: "menu.replace",
+      actorUserId: userTryingToCreate.id,
+      ip: controller.getClientIp(request),
+    });
+  }
+
   response.setHeader("Cache-Control", NO_STORE);
   return response
     .status(201)
@@ -45,8 +58,13 @@ async function getHandler(request, response) {
   const userTryingToGet = request.context.user;
   const found = await menu.findLatestByPlaceId(request.query.place_id);
 
+  // Com a sessão de quem o mandou, o aplicativo oferece editar o texto. Sem
+  // sessão é sempre `false`, e ler continua público.
+  found.can_edit = menu.canEditText(userTryingToGet, found);
+
   // Sem cache de borda: quem acabou de mandar um cardápio abre o lugar e
-  // espera ver o que mandou, e não o de um minuto atrás.
+  // espera ver o que mandou, e não o de um minuto atrás — e a resposta muda
+  // com quem pergunta.
   response.setHeader("Cache-Control", NO_STORE);
   return response
     .status(200)
