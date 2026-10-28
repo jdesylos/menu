@@ -152,7 +152,9 @@ function filterOutput(user, feature, resource) {
   }
 
   // Quem mandou não sai: o cardápio é do lugar, e quem lê não tem por que
-  // saber de que conta ele veio.
+  // saber de que conta ele veio. O que sai é só se QUEM LÊ pode mudar o
+  // texto dele (`can_edit`), quando a rota o calculou — ver
+  // `menu.canEditText` —, e onde fica o lugar, quando a leitura o trouxe.
   if (feature === "read:menu") {
     return {
       id: resource.id,
@@ -160,6 +162,8 @@ function filterOutput(user, feature, resource) {
       currency: resource.currency,
       sections: resource.sections,
       created_at: resource.created_at,
+      can_edit: resource.can_edit,
+      place_location: resource.place_location,
     };
   }
 

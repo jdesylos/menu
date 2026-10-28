@@ -1,7 +1,13 @@
 import database from "infra/database.js";
 import cdn from "infra/cdn.js";
 import place from "models/place.js";
-import { NotFoundError, ValidationError } from "infra/errors.js";
+import authorization from "models/authorization.js";
+import {
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from "infra/errors.js";
 
 // O cardápio de um lugar — ver a migration "create-menus" para o porquê das
 // três tabelas, e de cada envio ser um cardápio novo.
@@ -10,18 +16,34 @@ import { NotFoundError, ValidationError } from "infra/errors.js";
 // tela de revisão. Aqui não se lê foto nem se extrai nada: confere-se a forma,
 // e guarda-se.
 //
-// # Só o primeiro cardápio de cada lugar, por ora
+// # Trocar o cardápio que vale
 //
-// O que vale para o lugar é o mais recente, e qualquer conta ativada manda
-// cardápio: sem esta trava, uma conta trocava o preço de qualquer lugar do
-// mapa com um POST, e ninguém revisa o que chega. O aplicativo já não oferece
-// mandar para um lugar que tem cardápio; a API passa a recusar igual. Atualizar
-// o cardápio de um lugar volta quando houver quem revise.
+// O que vale para o lugar é o mais recente. O primeiro cardápio de um lugar
+// entra sem pedir mais nada. Para trocar o que já existe, o pedido diz qual
+// ele substitui (`replaces`), e a troca é recusada (409) quando aquele não é
+// mais o que vale: alguém trocou antes.
 //
-// Os lugares que já têm mais de um, de antes desta trava, continuam valendo
-// pelo mais recente. E duas contas mandando o PRIMEIRO cardápio do mesmo lugar
-// no mesmo instante passam as duas: a conferência e a gravação são uma
-// instrução só, mas cada uma vê o banco de quando começou.
+// Quem troca, e o quê:
+//
+// - **Fotografando no lugar** (`position`, a até 100 m dele): qualquer conta,
+//   e qualquer mudança. É quem está vendo a folha.
+// - **Sem fotografar**: só quem mandou o cardápio que vale, e só o TEXTO dos
+//   pratos que já estão nele — todos voltam, pelo `id`, e nenhum entra.
+//
+// Sem essa separação, qualquer conta trocava o preço de qualquer lugar do mapa
+// com um POST, e ninguém revisa o que chega. Era o motivo da trava que havia
+// antes, de um cardápio só por lugar.
+//
+// # O limite
+//
+// A posição vem do aparelho, e um GPS falso passa. O raio segura quem troca,
+// de casa, o cardápio de um lugar onde nunca esteve, e não quem insiste. Contra
+// esse, cada troca fica guardada com o cardápio que substituiu e a distância
+// (`replaces_menu_id` e `distance_m`), e dá para voltar atrás.
+//
+// E duas contas mandando o primeiro cardápio do mesmo lugar no mesmo instante
+// passam as duas, como passam duas trocas do mesmo cardápio: a conferência e a
+// gravação são uma instrução só, mas cada uma vê o banco de quando começou.
 
 const CURRENCIES = ["BRL", "USD", "EUR"];
 
@@ -36,28 +58,122 @@ const MAX_INGREDIENTS_LENGTH = 1000;
 // R$ 999.999,99. Acima disso é vírgula no lugar errado, e não prato.
 const MAX_PRICE_CENTS = 99_999_999;
 
+// O raio de quem fotografa: até 100 m do ponto do lugar, descontado o erro do
+// GPS a favor de quem está lá. Dentro de um prédio ele erra dezenas de metros,
+// e o ponto de um lugar num shopping pode ser o centro do shopping.
+const REACH_M = 100;
+// A leitura de GPS mais imprecisa que ainda conta. A localização "aproximada"
+// do Android chega a 2 km de erro, e com ela qualquer um estaria no raio de
+// qualquer lugar.
+const MAX_ACCURACY_M = 100;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function create(user, input) {
   const values = await parseInput(input);
 
-  // Uma instrução só, e por isso atômica: cardápio sem as seções, ou seção sem
-  // os pratos, não chega a existir. As seções e os pratos entram como JSON e
-  // viram linhas no próprio banco.
+  if (values.replaces) {
+    return await replace(user, values);
+  }
+
+  const id = await insert(user, values, { replaces: null, distance: null });
+
+  if (id === null) {
+    throw new ValidationError({
+      message: "Este lugar já tem cardápio.",
+      action: "Abra o cardápio dele pelo mapa.",
+    });
+  }
+
+  // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
+  // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio
+  // seguia sem cor no mapa — com o lugar já na lista de cardápios, que não
+  // passa pela borda.
+  //
+  // Só no primeiro cardápio do lugar, que é o único que muda o `has_menu`: a
+  // troca não muda a cor do marcador.
+  cdn.forget(place.cacheTagsOf(values.place));
+
+  return await findOneById(id);
+}
+
+// A troca do cardápio que vale — ver o topo do arquivo para quem troca e o
+// quê.
+async function replace(user, values) {
+  const base = await findOneById(values.replaces);
+
+  if (!base || base.place_id !== values.place.id) {
+    throw new NotFoundError({
+      message: "O cardápio a substituir não é deste lugar.",
+      action: "Abra o cardápio do lugar de novo e refaça as mudanças.",
+    });
+  }
+
+  rejectItemsNotIn(base, values.items);
+
+  let distance = null;
+  if (values.position) {
+    distance = distanceInMeters(values.place, values.position);
+    rejectOutOfReach(values.position, distance);
+  } else {
+    rejectMoreThanText(user, base, values.items);
+  }
+
+  const id = await insert(user, values, {
+    replaces: base.id,
+    distance: distance === null ? null : Math.round(distance),
+  });
+
+  if (id === null) {
+    throw new ConflictError({
+      message: "O cardápio deste lugar mudou enquanto você o editava.",
+      action: "Abra o cardápio de novo e refaça as mudanças.",
+    });
+  }
+
+  return await findOneById(id);
+}
+
+// Grava o cardápio, e devolve o id dele — ou `null`, quando o lugar não está
+// como o pedido supunha: sem cardápio nenhum, no primeiro; com `replaces`
+// ainda valendo, na troca.
+//
+// Uma instrução só, e por isso atômica: cardápio sem as seções, ou seção sem
+// os pratos, não chega a existir. As seções e os pratos entram como JSON e
+// viram linhas no próprio banco.
+async function insert(user, values, { replaces, distance }) {
   const result = await database.query({
     text: `
       WITH new_menu AS (
         INSERT INTO
-          menus (place_id, created_by, currency)
+          menus (place_id, created_by, currency, replaces_menu_id, distance_m)
         SELECT
-          $1, $2, $3
+          $1, $2, $3, $6::uuid, $7::integer
         WHERE
-          NOT EXISTS (
-            SELECT
-              1
-            FROM
-              menus
-            WHERE
-              menus.place_id = $1
-          )
+          CASE
+            WHEN $6::uuid IS NULL THEN NOT EXISTS (
+              SELECT
+                1
+              FROM
+                menus
+              WHERE
+                menus.place_id = $1
+            )
+            ELSE $6::uuid = (
+              SELECT
+                menus.id
+              FROM
+                menus
+              WHERE
+                menus.place_id = $1
+              ORDER BY
+                menus.created_at DESC,
+                menus.id DESC
+              LIMIT
+                1
+            )
+          END
         RETURNING
           id
       ),
@@ -107,27 +223,98 @@ async function create(user, input) {
       values.currency,
       JSON.stringify(values.sections),
       JSON.stringify(values.items),
+      replaces,
+      distance,
     ],
   });
 
-  if (result.rowCount === 0) {
+  return result.rowCount === 0 ? null : result.rows[0].id;
+}
+
+// Um prato com `id` é um prato do cardápio substituído, que volta com outro
+// texto. Um `id` que não é dele é pedido torto, e não permissão a conferir.
+function rejectItemsNotIn(base, items) {
+  const known = new Set(itemIdsOf(base));
+
+  if (items.some((item) => item.id !== undefined && !known.has(item.id))) {
     throw new ValidationError({
-      message: "Este lugar já tem cardápio.",
-      action: "Abra o cardápio dele pelo mapa.",
+      message: "Um dos pratos não é do cardápio que está sendo substituído.",
+      action: "Abra o cardápio do lugar de novo e refaça as mudanças.",
+    });
+  }
+}
+
+// Sem fotografar: só quem mandou, e só o texto — todos os pratos de antes
+// voltam, e nenhum entra. Os `id` já são únicos (`parseInput`) e todos do
+// cardápio substituído (`rejectItemsNotIn`), então contar basta.
+function rejectMoreThanText(user, base, items) {
+  if (!canEditText(user, base)) {
+    throw new ForbiddenError({
+      message: "Só quem mandou este cardápio pode mudar o texto dele.",
+      action: "Para trocar o cardápio, fotografe-o no lugar.",
     });
   }
 
-  // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
-  // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio
-  // seguia sem cor no mapa — com o lugar já na lista de cardápios, que não
-  // passa pela borda.
-  //
-  // A cada cardápio, e não só no primeiro do lugar, que é o único que muda o
-  // `has_menu`: saber qual é o primeiro pediria mais uma consulta, para poupar
-  // a borda de refazer cinco respostas pequenas.
-  cdn.forget(place.cacheTagsOf(values.place));
+  const sameItems =
+    items.every((item) => item.id !== undefined) &&
+    items.length === itemIdsOf(base).length;
 
-  return await findOneById(result.rows[0].id);
+  if (!sameItems) {
+    throw new ForbiddenError({
+      message:
+        "Sem fotografar, só se muda o texto dos pratos que já estão no cardápio.",
+      action:
+        "Para tirar ou acrescentar pratos, fotografe o cardápio no lugar.",
+    });
+  }
+}
+
+function rejectOutOfReach(position, distance) {
+  if (position.accuracy_m > MAX_ACCURACY_M) {
+    throw new ForbiddenError({
+      message: "A localização do aparelho não está precisa o bastante.",
+      action: "Ligue a localização exata e fotografe de novo.",
+    });
+  }
+
+  if (distance - position.accuracy_m > REACH_M) {
+    throw new ForbiddenError({
+      message: `Você está a ${formatDistance(distance)} deste lugar.`,
+      action: `Para trocar o cardápio de um lugar, fotografe-o a até ${REACH_M} m dele.`,
+    });
+  }
+}
+
+function itemIdsOf(found) {
+  return found.sections.flatMap((section) =>
+    section.items.map((item) => item.id),
+  );
+}
+
+// A distância na superfície da Terra, pela fórmula de haversine. A conta da
+// busca (`place.search`), em graus e sem raiz, serve para ordenar; aqui o
+// número é comparado com metros.
+function distanceInMeters(from, to) {
+  const EARTH_RADIUS_M = 6_371_000;
+  const radians = (degrees) => (Number(degrees) * Math.PI) / 180;
+
+  const dLat = radians(to.latitude) - radians(from.latitude);
+  const dLon = radians(to.longitude) - radians(from.longitude);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(radians(from.latitude)) *
+      Math.cos(radians(to.latitude)) *
+      Math.sin(dLon / 2) ** 2;
+
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// "850 m", "2,1 km" — como a lista do aplicativo diz.
+function formatDistance(meters) {
+  if (meters < 1000) {
+    return `${Math.round(meters)} m`;
+  }
+  return `${(meters / 1000).toFixed(1).replace(".", ",")} km`;
 }
 
 async function parseInput(input) {
@@ -138,7 +325,22 @@ async function parseInput(input) {
     });
   }
 
-  rejectUnknownKeys(input, ["place_id", "currency", "sections"], "no cardápio");
+  rejectUnknownKeys(
+    input,
+    ["place_id", "currency", "sections", "replaces", "position"],
+    "no cardápio",
+  );
+
+  const replaces = parseReplaces(input.replaces);
+
+  if (input.position !== undefined && replaces === null) {
+    throw new ValidationError({
+      message: "A posição só vale para trocar um cardápio.",
+      action: "Envie position junto de replaces, ou tire-a.",
+    });
+  }
+  const position =
+    input.position === undefined ? null : parsePosition(input.position);
 
   if (!CURRENCIES.includes(input.currency)) {
     throw new ValidationError({
@@ -193,10 +395,18 @@ async function parseInput(input) {
       items.push({
         section_position: sectionPosition,
         position: itemPosition,
-        ...parseItem(item),
+        ...parseItem(item, { replacing: replaces !== null }),
       });
     });
   });
+
+  const ids = items.filter((item) => item.id !== undefined).map((i) => i.id);
+  if (new Set(ids).size !== ids.length) {
+    throw new ValidationError({
+      message: "Dois pratos vieram com o mesmo id.",
+      action: "Cada prato do cardápio substituído volta uma vez só.",
+    });
+  }
 
   if (items.length === 0) {
     throw new ValidationError({
@@ -216,10 +426,70 @@ async function parseInput(input) {
   // volta 400 sem gastar a consulta.
   const target = await findVisiblePlace(input.place_id);
 
-  return { place: target, currency: input.currency, sections, items };
+  return {
+    place: target,
+    currency: input.currency,
+    sections,
+    items,
+    replaces,
+    position,
+  };
 }
 
-function parseItem(item) {
+// O cardápio que a troca substitui. Id sem forma de UUID não existe, e
+// passá-lo ao Postgres viraria erro de sintaxe — um 500 no lugar do 400.
+function parseReplaces(value) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    throw new ValidationError({
+      message: "O cardápio a substituir precisa ser um id.",
+      action: "Envie em replaces o id do cardápio que vale para o lugar.",
+    });
+  }
+
+  return value;
+}
+
+// Onde estava quem fotografou, como o aparelho mediu: a coordenada e o raio do
+// erro, em metros.
+function parsePosition(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ValidationError({
+      message: "A posição precisa ser um objeto.",
+      action: "Envie latitude, longitude e accuracy_m.",
+    });
+  }
+
+  rejectUnknownKeys(
+    value,
+    ["latitude", "longitude", "accuracy_m"],
+    "na posição",
+  );
+
+  const { latitude, longitude, accuracy_m } = value;
+  const valid =
+    Number.isFinite(latitude) &&
+    Math.abs(latitude) <= 90 &&
+    Number.isFinite(longitude) &&
+    Math.abs(longitude) <= 180 &&
+    Number.isFinite(accuracy_m) &&
+    accuracy_m >= 0;
+
+  if (!valid) {
+    throw new ValidationError({
+      message: "A posição não é uma coordenada.",
+      action:
+        "Envie latitude e longitude em graus, e accuracy_m em metros, como números.",
+    });
+  }
+
+  return { latitude, longitude, accuracy_m };
+}
+
+function parseItem(item, { replacing }) {
   if (typeof item !== "object" || item === null || Array.isArray(item)) {
     throw new ValidationError({
       message: "Um dos pratos não é um objeto.",
@@ -227,7 +497,21 @@ function parseItem(item) {
     });
   }
 
-  rejectUnknownKeys(item, ["name", "ingredients", "price_cents"], "no prato");
+  // O `id` diz qual prato do cardápio substituído este é, e só vale na troca.
+  const known = replacing
+    ? ["id", "name", "ingredients", "price_cents"]
+    : ["name", "ingredients", "price_cents"];
+  rejectUnknownKeys(item, known, "no prato");
+
+  if (
+    item.id !== undefined &&
+    (typeof item.id !== "string" || !UUID_PATTERN.test(item.id))
+  ) {
+    throw new ValidationError({
+      message: "O id de um dos pratos não é um id.",
+      action: "Envie o id que o prato tinha no cardápio lido, ou nenhum.",
+    });
+  }
 
   const name = parseText(item.name, {
     field: "o nome do prato",
@@ -248,7 +532,12 @@ function parseItem(item) {
       max: MAX_INGREDIENTS_LENGTH,
     }) || null;
 
-  return { name, ingredients, price_cents: parsePrice(item.price_cents) };
+  return {
+    id: item.id,
+    name,
+    ingredients,
+    price_cents: parsePrice(item.price_cents),
+  };
 }
 
 // Aparado e em NFC: acento decomposto renderiza com "?" no atlas do
@@ -340,7 +629,26 @@ async function findLatestByPlaceId(placeId) {
     });
   }
 
-  return result.rows[0];
+  // Onde fica o lugar: é dali que o aplicativo mede o raio de quem quer
+  // fotografar o cardápio de novo — ver `create`.
+  return {
+    ...result.rows[0],
+    place_location: { latitude: target.latitude, longitude: target.longitude },
+  };
+}
+
+// Se `user` pode mudar o TEXTO de `found` — nome, descrição, preço, título —
+// de onde estiver, sem fotografar: só quem mandou aquele cardápio. Quem não o
+// mandou só o troca fotografando de novo, no lugar — ver `create`.
+//
+// É o que o aplicativo pergunta para mostrar o botão de editar, e o que
+// `create` confere quando o pedido chega sem posição.
+function canEditText(user, found) {
+  return (
+    typeof user.id === "string" &&
+    user.id === found.created_by &&
+    authorization.can(user, "create:menu")
+  );
 }
 
 async function findOneById(id) {
@@ -459,9 +767,8 @@ async function findPlaces({ latitude, longitude }) {
 // mais antigo — a aba "Meus cardápios" do aplicativo.
 //
 // O resumo de cada lugar é o do último cardápio que ESTA conta mandou para
-// ele, e não o do que vale: se outra pessoa mandou um depois, a linha continua
-// dizendo o que a conta mandou. Hoje os dois são o mesmo, porque o aplicativo
-// não manda cardápio para um lugar que já tem um.
+// ele, e não o do que vale: se outra pessoa o trocou depois — fotografando no
+// lugar, ver `create` —, a linha continua dizendo o que a conta mandou.
 //
 // O lugar oculto fica de fora, como na lista de todos: o cardápio dele
 // continua guardado, mas não há mais o lugar no mapa para abri-lo.
@@ -512,6 +819,7 @@ const SELECT_MENU = `
     menus.id,
     menus.place_id,
     menus.created_by,
+    menus.replaces_menu_id,
     menus.currency,
     menus.created_at,
     COALESCE(
@@ -525,6 +833,7 @@ const SELECT_MENU = `
                   SELECT
                     jsonb_agg(
                       jsonb_build_object(
+                        'id', menu_items.id,
                         'name', menu_items.name,
                         'ingredients', menu_items.ingredients,
                         'price_cents', menu_items.price_cents
@@ -554,6 +863,7 @@ const SELECT_MENU = `
 
 const menu = {
   create,
+  canEditText,
   findLatestByPlaceId,
   findPlaces,
   findPlacesByCreator,

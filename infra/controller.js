@@ -12,6 +12,7 @@ import {
   NotFoundError,
   UnauthorizedError,
   ForbiddenError,
+  ConflictError,
   RateLimitError,
 } from "infra/errors";
 
@@ -24,7 +25,8 @@ function onErrorHandler(error, request, response) {
   if (
     error instanceof ValidationError ||
     error instanceof NotFoundError ||
-    error instanceof ForbiddenError
+    error instanceof ForbiddenError ||
+    error instanceof ConflictError
   ) {
     return response.status(error.statusCode).json(error);
   }

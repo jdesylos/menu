@@ -134,7 +134,7 @@ describe("GET /api/v1/user/menus", () => {
     });
 
     // Um lugar, uma linha: a do último envio da conta para ele. O mais velho
-    // entra direto no banco — a rota não aceita mais um segundo cardápio.
+    // entra direto no banco, com a data no passado.
     test("With two menus sent to the same place", async () => {
       const sessionObject = await sessionForActivatedUser();
       const placeId = await createPlace("Bar Mandado Duas Vezes");

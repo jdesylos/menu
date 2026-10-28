@@ -129,7 +129,7 @@ describe("GET /api/v1/menus/places", () => {
     });
 
     // O resumo é o do cardápio que vale: o mais recente. O mais velho entra
-    // direto no banco — a rota não aceita mais um segundo cardápio.
+    // direto no banco, com a data no passado.
     test("With a place that received two menus", async () => {
       const sessionObject = await sessionForActivatedUser();
       const placeId = await createPlace("Bar que Mudou", {
