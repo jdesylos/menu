@@ -5,7 +5,10 @@ import database from "infra/database.js";
 import webserver from "infra/webserver.js";
 import { NotFoundError, ForbiddenError } from "infra/errors.js";
 
-const EXPIRATION_IN_MILLISECONDS = 60 * 15 * 1000; // 15 minutes
+// Um dia, e não quinze minutos: não há reenvio do link, e quem abria o email
+// mais tarde ficava com uma conta que nunca entra. O prazo maior não abre
+// porta nova — quem lê o email já recupera a senha por ele.
+const EXPIRATION_IN_MILLISECONDS = 60 * 60 * 24 * 1000; // 24 hours
 
 async function findOneValidById(tokenId) {
   const activationTokenObject = await runSelectQuery(tokenId);
@@ -119,7 +122,8 @@ async function sendEmailToUser(user, activationToken) {
     from: "Menu Spoiler <contato@menuspoiler.com.br>",
     to: user.email,
     subject: "Ative seu cadastro no Menu Spoiler!",
-    text: `Olá! Clique no link abaixo para ativar seu cadastro no Menu Spoiler:
+    text: `Olá! Abra o link abaixo no celular em que o Menu Spoiler está instalado
+para ativar seu cadastro. Ele vale por 24 horas.
 
 ${webserver.origin}/cadastro/ativar/${activationToken.id}
 

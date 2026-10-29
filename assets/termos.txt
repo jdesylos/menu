@@ -42,7 +42,7 @@ Não vendemos seus dados. Eles passam apenas pelos provedores necessários para 
 
 # Por quanto tempo guardamos
 
-- Link de ativação: 15 minutos.
+- Link de ativação: 24 horas.
 - Sessão: 30 dias desde o último uso.
 - Conta: enquanto ela existir. Quando você apaga a conta, o nome de usuário, o email, a senha e as sessões são apagados na hora.
 - Cardápios enviados e sugestões: não são apagados junto com a conta. Eles continuam no aplicativo, sem ligação com você: o cardápio é do lugar, e não de quem o enviou.
