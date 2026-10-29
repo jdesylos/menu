@@ -48,6 +48,16 @@ async function postHandler(request, response) {
       actorUserId: authenticatedUser.id,
       ip,
     });
+    // A conta que ainda espera o link de ativação ouve o que fazer, e não a
+    // recusa genérica, que mandava procurar o suporte. Não revela nada a
+    // ninguém: só chega aqui quem acertou o email E a senha.
+    if (authorization.can(authenticatedUser, "read:activation_token")) {
+      throw new ForbiddenError({
+        message: "Sua conta ainda não foi ativada.",
+        action:
+          "Abra o link que enviamos para o seu email no celular em que o aplicativo está instalado.",
+      });
+    }
     throw new ForbiddenError({
       message: "Você não possui permissão para fazer login.",
       action: "Contate o suporte caso você acredite que isto seja um erro.",

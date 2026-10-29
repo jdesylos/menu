@@ -2,6 +2,7 @@ import { version as uuidVersion } from "uuid";
 import setCookieParser from "set-cookie-parser";
 import orchestrator from "tests/orchestrator.js";
 import session from "models/session.js";
+import user from "models/user.js";
 import webserver from "infra/webserver.js";
 
 beforeAll(async () => {
@@ -91,6 +92,66 @@ describe("POST /api/v1/sessions", () => {
         message: "Dados de autenticação não conferem.",
         action: "Verifique se os dados enviados estão corretos.",
         status_code: 401,
+      });
+    });
+
+    test("With correct `email` and `password`, before activating the account", async () => {
+      await orchestrator.createUser({
+        email: "sem.ativar@menuspoiler.com.br",
+        password: "senhacorreta",
+      });
+
+      const response = await fetch(`${webserver.origin}/api/v1/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: "sem.ativar@menuspoiler.com.br",
+          password: "senhacorreta",
+        }),
+      });
+
+      expect(response.status).toBe(403);
+
+      const responseBody = await response.json();
+
+      expect(responseBody).toEqual({
+        name: "ForbiddenError",
+        message: "Sua conta ainda não foi ativada.",
+        action:
+          "Abra o link que enviamos para o seu email no celular em que o aplicativo está instalado.",
+        status_code: 403,
+      });
+    });
+
+    test("With correct `email` and `password`, from an account that cannot log in", async () => {
+      const createdUser = await orchestrator.createUser({
+        email: "sem.permissao@menuspoiler.com.br",
+        password: "senhacorreta",
+      });
+      await user.setFeatures(createdUser.id, []);
+
+      const response = await fetch(`${webserver.origin}/api/v1/sessions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: "sem.permissao@menuspoiler.com.br",
+          password: "senhacorreta",
+        }),
+      });
+
+      expect(response.status).toBe(403);
+
+      const responseBody = await response.json();
+
+      expect(responseBody).toEqual({
+        name: "ForbiddenError",
+        message: "Você não possui permissão para fazer login.",
+        action: "Contate o suporte caso você acredite que isto seja um erro.",
+        status_code: 403,
       });
     });
 
