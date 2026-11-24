@@ -105,5 +105,39 @@ describe("models/authorization.js", () => {
         updated_at: "2026-01-01T00:00:00.000Z",
       });
     });
+
+    test("with `read:user:admin`, exposes administrative fields without password", () => {
+      const adminUser = {
+        features: ["admin", "read:user:admin"],
+      };
+
+      const resource = {
+        id: 1,
+        username: "resource",
+        email: "resource@resource.com",
+        features: ["create:session"],
+        password: "hashed-password",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+        deleted_at: null,
+      };
+
+      const result = authorization.filterOutput(
+        adminUser,
+        "read:user:admin",
+        resource,
+      );
+
+      expect(result).toEqual({
+        id: 1,
+        username: "resource",
+        email: "resource@resource.com",
+        features: ["create:session"],
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+        deleted_at: null,
+      });
+      expect(result).not.toHaveProperty("password");
+    });
   });
 });

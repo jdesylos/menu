@@ -1,4 +1,5 @@
 import authorization from "models/authorization.js";
+import { ACTIVATED_FEATURES } from "models/features.js";
 import user from "models/user.js";
 import email from "infra/email.js";
 import database from "infra/database.js";
@@ -12,15 +13,6 @@ const EXPIRATION_IN_MILLISECONDS = 60 * 60 * 24 * 1000; // 24 hours
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const ACTIVATED_FEATURES = [
-  "create:session",
-  "read:session",
-  "update:user",
-  "create:place",
-  "update:place",
-  "create:menu",
-];
 
 function tokenNotFoundError() {
   return new NotFoundError({
@@ -249,6 +241,7 @@ Equipe Menu Spoiler`,
 }
 
 const activation = {
+  ACTIVATED_FEATURES,
   findOneValidById,
   activateByTokenId,
   create,

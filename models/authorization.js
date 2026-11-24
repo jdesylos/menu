@@ -1,20 +1,22 @@
 import { InternalServerError } from "infra/errors.js";
+import { ADMIN_PANEL_FEATURES } from "models/features.js";
 
 const availableFeatures = [
   // ADMIN
-  // Marcador de quem modera o mapa. Não concede nada por si, como no
-  // repositório judhagsan: cada ação continua exigindo a sua feature granular
-  // (`manage:place` e companhia). "Enxerga a moderação" e "pode aceitar uma
-  // sugestão" são perguntas diferentes, e quem ganhar uma por um motivo
-  // pontual não herda a outra sem ninguém ter decidido isso.
+  // Marcador de quem modera e administra o painel. Não concede nada por si,
+  // como no repositório judhagsan: cada ação continua exigindo a sua feature
+  // granular (`manage:place`, `manage:menu`, etc.).
   "admin",
+  "manage:admins",
 
   // USER
   "create:user",
   "read:user",
   "read:user:self",
+  "read:user:admin",
   "update:user",
   "update:user:others",
+  "erase:user:others",
 
   // SESSION
   "create:session",
@@ -54,6 +56,9 @@ const availableFeatures = [
   // Chave de formatação do `filterOutput`, como a `read:place_suggestion`:
   // ler o cardápio de um lugar é público, e nenhuma rota exige esta feature.
   "read:menu",
+  // Editar ou substituir qualquer cardápio pelo painel administrativo, sem
+  // trava de distância ou autoria original.
+  "manage:menu",
 ];
 
 function can(user, feature, resource) {
@@ -107,6 +112,18 @@ function filterOutput(user, feature, resource) {
         updated_at: resource.updated_at,
       };
     }
+  }
+
+  if (feature === "read:user:admin") {
+    return {
+      id: resource.id,
+      username: resource.username,
+      email: resource.email,
+      features: resource.features,
+      created_at: resource.created_at,
+      updated_at: resource.updated_at,
+      deleted_at: resource.deleted_at ?? null,
+    };
   }
 
   if (feature === "read:session") {
@@ -224,6 +241,8 @@ function validateResource(resource) {
 }
 
 const authorization = {
+  ADMIN_PANEL_FEATURES,
+  availableFeatures,
   can,
   filterOutput,
 };
