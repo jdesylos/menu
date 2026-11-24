@@ -12,6 +12,8 @@ export default function ConfirmarNovoEmail() {
   const [carregando, setCarregando] = useState(true);
   const [confirmando, setConfirmando] = useState(false);
   const [concluido, setConcluido] = useState(null);
+  const [enviandoSenha, setEnviandoSenha] = useState(false);
+  const [senhaEnviada, setSenhaEnviada] = useState(false);
 
   useEffect(() => {
     if (!router.isReady || !token) return;
@@ -52,6 +54,23 @@ export default function ConfirmarNovoEmail() {
     }
   }
 
+  async function handleSendPasswordRecovery() {
+    if (!concluido) return;
+    setErro(null);
+    setEnviandoSenha(true);
+    try {
+      await apiFetch("/api/v1/recoveries", {
+        method: "POST",
+        body: { email: concluido },
+      });
+      setSenhaEnviada(true);
+    } catch (error) {
+      setErro(error.message);
+    } finally {
+      setEnviandoSenha(false);
+    }
+  }
+
   return (
     <AdminAuthShell
       aba="Confirmar alteração de e-mail"
@@ -67,9 +86,36 @@ export default function ConfirmarNovoEmail() {
       ) : null}
 
       {concluido ? (
-        <div className="adm-alert adm-alert-success" role="status">
-          E-mail alterado com sucesso para <strong>{concluido}</strong>.
-        </div>
+        <>
+          <div className="adm-alert adm-alert-success" role="status">
+            E-mail alterado com sucesso para <strong>{concluido}</strong>.
+          </div>
+
+          {senhaEnviada ? (
+            <div className="adm-alert adm-alert-info" role="status">
+              Enviamos um link de redefinição de senha para{" "}
+              <strong>{concluido}</strong>. Abra-o no celular em que o
+              aplicativo Menu Spoiler está instalado.
+            </div>
+          ) : (
+            <div style={{ marginTop: 10 }}>
+              <p className="adm-muted" style={{ marginBottom: 8 }}>
+                Precisa definir uma senha nova para entrar no aplicativo?
+              </p>
+              <button
+                type="button"
+                disabled={enviandoSenha}
+                onClick={handleSendPasswordRecovery}
+                className="adm-btn adm-btn-primary"
+                style={{ width: "100%" }}
+              >
+                {enviandoSenha
+                  ? "Enviando link..."
+                  : "Enviar link para criar nova senha"}
+              </button>
+            </div>
+          )}
+        </>
       ) : null}
 
       {!carregando && dados && !concluido ? (

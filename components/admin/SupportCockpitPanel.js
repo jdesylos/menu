@@ -20,6 +20,20 @@ const STATUS_META = {
   archived: { label: "Arquivada", pill: "adm-pill-neutral", rail: "" },
 };
 
+const RECOVERY_REASON_LABELS = {
+  insufficient_private_history:
+    "Histórico insuficiente (conta sem cardápios ou sugestões enviados)",
+  inconclusive_answers:
+    "Respostas não atingiram o critério automático de comprovação",
+  admin_account_requires_manual_review:
+    "Conta administrativa exige revisão manual",
+  unactivated_account: "Conta ainda não ativada",
+  account_not_found_or_inactive:
+    "Identificador não localizado ou conta excluída",
+  new_email_unavailable: "Novo e-mail já em uso ou igual ao atual",
+  abuse_rate_limit: "Excesso de tentativas recentes para este identificador",
+};
+
 function getTitle(item) {
   if (item.category === "missing_place") {
     return item.place_name || "(local sem nome)";
@@ -397,6 +411,26 @@ export default function SupportCockpitPanel({
                         </div>
                       ) : null}
 
+                      {item.metadata?.source === "recovery_without_email" ? (
+                        <div className="adm-muted">
+                          <strong>Triagem automática (1.4):</strong>{" "}
+                          {RECOVERY_REASON_LABELS[item.metadata.reason] ||
+                            item.metadata.reason ||
+                            "Encaminhada para análise"}{" "}
+                          • E-mail anterior:{" "}
+                          {item.metadata.old_email_matched
+                            ? "conferiu"
+                            : "não conferiu"}{" "}
+                          • Locais privados conferidos:{" "}
+                          {Number(item.metadata.places_matched_count || 0)} •
+                          Reforço:{" "}
+                          {item.metadata.reinforcement_matched ? "sim" : "não"}
+                          {Number(item.metadata.attempt_count || 1) > 1
+                            ? ` • Tentativas registradas: ${item.metadata.attempt_count}`
+                            : ""}
+                        </div>
+                      ) : null}
+
                       {item.resolved_place_id ? (
                         <div>
                           <strong>Local vinculado:</strong>{" "}
@@ -491,6 +525,14 @@ export default function SupportCockpitPanel({
                             ? "Salvando…"
                             : "Salvar atendimento"}
                         </button>
+                        {item.category === "account_help" && item.user_id ? (
+                          <Link
+                            href={`/admin/usuarios/${item.user_id}`}
+                            className="adm-btn adm-btn-secondary adm-btn-xs"
+                          >
+                            Abrir ficha da conta →
+                          </Link>
+                        ) : null}
                       </div>
                     </form>
                   </div>
