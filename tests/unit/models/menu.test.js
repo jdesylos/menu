@@ -59,7 +59,7 @@ describe("models/menu.js", () => {
       const created = await menu.create(CONTA, cardapioPara(LUGAR.id));
 
       expect(created).toEqual(guardado);
-      // Os tiles do lugar, um por zoom em que o aplicativo pede lugares.
+      // Os tiles do lugar (um por zoom) mais a etiqueta do cardápio público.
       expect(cdn.forget).toHaveBeenCalledTimes(1);
       expect(cdn.forget).toHaveBeenCalledWith([
         "places-14-6114-9306",
@@ -67,6 +67,7 @@ describe("models/menu.js", () => {
         "places-16-24457-37226",
         "places-17-48915-74452",
         "places-18-97830-148904",
+        `menu-${LUGAR.id}`,
       ]);
     });
 
@@ -196,8 +197,9 @@ describe("models/menu.js", () => {
       // De qual saiu, e sem distância: ninguém fotografou.
       expect(gravacoes[0][5]).toBe(BASE.id);
       expect(gravacoes[0][6]).toBeNull();
-      // A troca não muda o `has_menu` do tile.
-      expect(cdn.forget).not.toHaveBeenCalled();
+      // A troca não muda o `has_menu` do tile, mas apaga o cache do cardápio.
+      expect(cdn.forget).toHaveBeenCalledTimes(1);
+      expect(cdn.forget).toHaveBeenCalledWith([`menu-${LUGAR.id}`]);
     });
 
     test("by who sent it, leaving an item out", async () => {
@@ -247,7 +249,8 @@ describe("models/menu.js", () => {
 
       expect(gravacoes[0][5]).toBe(BASE.id);
       expect(gravacoes[0][6]).toBe(50);
-      expect(cdn.forget).not.toHaveBeenCalled();
+      expect(cdn.forget).toHaveBeenCalledTimes(1);
+      expect(cdn.forget).toHaveBeenCalledWith([`menu-${LUGAR.id}`]);
     });
 
     test("photographing away from the place", async () => {

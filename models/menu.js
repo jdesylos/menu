@@ -89,11 +89,9 @@ async function create(user, input) {
   // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
   // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio
   // seguia sem cor no mapa — com o lugar já na lista de cardápios, que não
-  // passa pela borda.
-  //
-  // Só no primeiro cardápio do lugar, que é o único que muda o `has_menu`: a
-  // troca não muda a cor do marcador.
-  cdn.forget(place.cacheTagsOf(values.place));
+  // passa pela borda. Também apaga eventual cache de leitura pública do
+  // cardápio deste lugar.
+  cdn.forget([...place.cacheTagsOf(values.place), cacheTag(values.place.id)]);
 
   return await findOneById(id);
 }
@@ -131,6 +129,8 @@ async function replace(user, values) {
       action: "Abra o cardápio de novo e refaça as mudanças.",
     });
   }
+
+  cdn.forget([cacheTag(values.place.id)]);
 
   return await findOneById(id);
 }
@@ -861,9 +861,14 @@ const SELECT_MENU = `
     menus
 `;
 
+function cacheTag(placeId) {
+  return `menu-${placeId}`;
+}
+
 const menu = {
   create,
   canEditText,
+  cacheTag,
   findLatestByPlaceId,
   findPlaces,
   findPlacesByCreator,

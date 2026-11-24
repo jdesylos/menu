@@ -5,6 +5,7 @@ import { ValidationError, ServiceError } from "infra/errors.js";
 const MAX_ZOOM = 15;
 
 const PROTOMAPS_TILE_URL = "https://api.protomaps.com/tiles/v4";
+const FETCH_TIMEOUT_MS = 10_000;
 
 // Caixa que cobre o Brasil com folga (inclui Fernando de Noronha e a ponta do
 // Chuí). Ver `isWithinServedArea` para o porquê de existir.
@@ -302,7 +303,9 @@ async function fetchVectorTile({ zoom, column, row }) {
 
   let upstreamResponse;
   try {
-    upstreamResponse = await fetch(upstreamUrl);
+    upstreamResponse = await fetch(upstreamUrl, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch (error) {
     throw new ServiceError({
       cause: error,

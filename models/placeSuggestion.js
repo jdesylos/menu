@@ -1,6 +1,7 @@
 import database from "infra/database.js";
 import cdn from "infra/cdn.js";
 import authorization from "models/authorization.js";
+import menu from "models/menu.js";
 import place from "models/place.js";
 import {
   ForbiddenError,
@@ -288,36 +289,33 @@ async function review(user, id, status) {
     throw suggestionNotFound();
   }
 
-  const client = await database.getNewClient();
-
-  try {
-    await client.query("BEGIN");
-
-    const found = await client.query({
-      text: "SELECT * FROM place_suggestions WHERE id = $1 FOR UPDATE;",
-      values: [id],
-    });
-
-    if (found.rowCount === 0) {
-      throw suggestionNotFound();
-    }
-
-    const suggestion = found.rows[0];
-
-    if (suggestion.status !== "pending") {
-      throw new ValidationError({
-        message: "Esta sugestão já foi revisada.",
-        action: "Atualize a fila e escolha uma sugestão pendente.",
+  const { updated, applied } = await database.withTransaction(
+    async (client) => {
+      const found = await client.query({
+        text: "SELECT * FROM place_suggestions WHERE id = $1 FOR UPDATE;",
+        values: [id],
       });
-    }
 
-    const applied =
-      status === "accepted"
-        ? await apply(client, suggestion)
-        : { placeId: suggestion.place_id, positions: [] };
+      if (found.rowCount === 0) {
+        throw suggestionNotFound();
+      }
 
-    const updated = await client.query({
-      text: `
+      const suggestion = found.rows[0];
+
+      if (suggestion.status !== "pending") {
+        throw new ValidationError({
+          message: "Esta sugestão já foi revisada.",
+          action: "Atualize a fila e escolha uma sugestão pendente.",
+        });
+      }
+
+      const applied =
+        status === "accepted"
+          ? await apply(client, suggestion)
+          : { placeId: suggestion.place_id, positions: [], hidePlace: false };
+
+      const updated = await client.query({
+        text: `
         UPDATE
           place_suggestions
         SET
@@ -331,30 +329,30 @@ async function review(user, id, status) {
         RETURNING
           *
       ;`,
-      values: [id, status, applied.placeId, user.id],
-    });
+        values: [id, status, applied.placeId, user.id],
+      });
 
-    await client.query("COMMIT");
+      return { updated: updated.rows[0], applied };
+    },
+  );
 
-    // O tile guarda na borda, por uma hora, os lugares que tinha — ver a rota
-    // `places/[z]/[x]/[y]`. Sem isto, a sugestão aceita só chegava ao mapa
-    // quando a cópia vencesse: o Queijo e Carne Burger, cadastrado por
-    // sugestão na Raul Saddi, ficou de fora até lá, e o Brasil Burguer, que
-    // outra sugestão fechou, continuou no lugar dele.
-    //
-    // Depois do COMMIT, e não antes: apagar antes deixaria a função refazer o
-    // tile ainda com o dado velho, e a borda o guardaria por mais uma hora.
-    if (applied.positions.length > 0) {
-      cdn.forget(cacheTagsOf(applied.positions));
+  // O tile guarda na borda, por uma hora, os lugares que tinha — ver a rota
+  // `places/[z]/[x]/[y]`. Sem isto, a sugestão aceita só chegava ao mapa
+  // quando a cópia vencesse: o Queijo e Carne Burger, cadastrado por
+  // sugestão na Raul Saddi, ficou de fora até lá, e o Brasil Burguer, que
+  // outra sugestão fechou, continuou no lugar dele.
+  //
+  // Depois do COMMIT, e não antes: apagar antes deixaria a função refazer o
+  // tile ainda com o dado velho, e a borda o guardaria por mais uma hora.
+  if (applied.positions.length > 0) {
+    const tags = cacheTagsOf(applied.positions);
+    if (applied.hidePlace && applied.placeId) {
+      tags.push(menu.cacheTag(applied.placeId));
     }
-
-    return updated.rows[0];
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    await client.end();
+    cdn.forget(tags);
   }
+
+  return updated;
 }
 
 // O que cada tipo aceito faz no lugar. Devolve o id do lugar — no `create`, o
@@ -450,7 +448,11 @@ async function apply(client, suggestion) {
     ;`,
     values: [suggestion.place_id, reason, suggestion.duplicate_of],
   });
-  return { placeId: suggestion.place_id, positions: hidden.rows };
+  return {
+    placeId: suggestion.place_id,
+    positions: hidden.rows,
+    hidePlace: true,
+  };
 }
 
 // As etiquetas dos tiles dessas posições, sem repetir: a correção que só
