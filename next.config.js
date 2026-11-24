@@ -35,6 +35,14 @@ module.exports = {
         headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
       },
       {
+        source: "/conta/confirmar-email/:path*",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
+      {
+        source: "/admin/recuperar-senha/:path*",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
+      {
         source: "/.well-known/apple-app-site-association",
         headers: [
           { key: "Content-Type", value: "application/json" },
