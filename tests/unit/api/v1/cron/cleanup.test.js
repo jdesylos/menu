@@ -80,6 +80,7 @@ describe("GET /api/v1/cron/cleanup", () => {
       sessions: 2,
       activation_tokens: 1,
       recovery_tokens: 3,
+      email_change_tokens: 2,
     };
     database.query.mockResolvedValue({ rows: [deleted] });
     const r = resposta();

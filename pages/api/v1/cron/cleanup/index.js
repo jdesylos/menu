@@ -34,12 +34,18 @@ async function getHandler(request, response) {
       DELETE FROM password_recovery_tokens
       WHERE expires_at < NOW() - interval '7 days'
       RETURNING 1
+    ),
+    deleted_email_change_tokens AS (
+      DELETE FROM user_email_change_tokens
+      WHERE expires_at < NOW() - interval '7 days'
+      RETURNING 1
     )
     SELECT
       (SELECT count(*)::int FROM deleted_rate_limits) AS rate_limits,
       (SELECT count(*)::int FROM deleted_sessions) AS sessions,
       (SELECT count(*)::int FROM deleted_activation_tokens) AS activation_tokens,
-      (SELECT count(*)::int FROM deleted_recovery_tokens) AS recovery_tokens
+      (SELECT count(*)::int FROM deleted_recovery_tokens) AS recovery_tokens,
+      (SELECT count(*)::int FROM deleted_email_change_tokens) AS email_change_tokens
   ;`);
 
   response.setHeader("Cache-Control", "no-store");
