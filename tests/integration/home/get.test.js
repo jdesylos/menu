@@ -15,6 +15,7 @@ describe("GET /", () => {
 
       const responseBody = await response.text();
 
+      expect(responseBody).toContain('<html lang="pt-BR">');
       expect(responseBody).toContain("O cardápio antes de você chegar.");
       expect(responseBody).toContain("Em breve para Android e iOS.");
       expect(responseBody).toContain(

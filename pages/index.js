@@ -1,6 +1,6 @@
 import Head from "next/head";
 import Link from "next/link";
-import localFont from "next/font/local";
+import { instrumentSans } from "lib/fonts.js";
 
 // A home é PROVISÓRIA: uma tela só, que diz o que o Menu Spoiler é e que ele
 // ainda não está em loja nenhuma. Ela existe porque o domínio já está no ar, e
@@ -11,16 +11,6 @@ import localFont from "next/font/local";
 // for publicado, a frase vira os dois links.
 //
 // Nada aqui fala com a API nem com o banco — a página sai estática.
-
-// A letra é a do aplicativo, servida daqui mesmo: fonte de terceiro seria uma
-// requisição a outro site só para desenhar o título.
-const instrumentSans = localFont({
-  src: [
-    { path: "../assets/InstrumentSans-Regular.ttf", weight: "400" },
-    { path: "../assets/InstrumentSans-SemiBold.ttf", weight: "600" },
-  ],
-  display: "swap",
-});
 
 const TITULO = "O cardápio antes de você chegar.";
 const DESCRICAO =
@@ -51,9 +41,7 @@ export default function Home() {
         <meta property="og:description" content={TITULO} />
         <meta property="og:locale" content="pt_BR" />
       </Head>
-      {/* O idioma vai aqui, e não no <html>, para não criar um `_document`
-          que mudaria as outras páginas junto. */}
-      <main lang="pt-BR" className={`pagina ${instrumentSans.className}`}>
+      <main className={`pagina ${instrumentSans.className}`}>
         <p className="marca">Menu Spoiler</p>
 
         <div className="conteudo">

@@ -1,6 +1,6 @@
 import Head from "next/head";
 import Link from "next/link";
-import localFont from "next/font/local";
+import { instrumentSans } from "lib/fonts.js";
 
 // A página de LER: os termos e o caminho para apagar a conta, que as lojas
 // pedem num endereço público e que qualquer um precisa conseguir ler no
@@ -8,15 +8,6 @@ import localFont from "next/font/local";
 // tela só — mas com a letra, a marca e o rodapé dela.
 //
 // Nada aqui fala com a API nem com o banco: as páginas saem estáticas.
-
-// A letra do aplicativo, servida daqui mesmo, como na home.
-const instrumentSans = localFont({
-  src: [
-    { path: "../assets/InstrumentSans-Regular.ttf", weight: "400" },
-    { path: "../assets/InstrumentSans-SemiBold.ttf", weight: "600" },
-  ],
-  display: "swap",
-});
 
 export default function PaginaDeTexto({ aba, descricao, titulo, children }) {
   return (
@@ -27,7 +18,7 @@ export default function PaginaDeTexto({ aba, descricao, titulo, children }) {
         <meta name="description" content={descricao} />
         <meta name="theme-color" content="#1FB2E8" />
       </Head>
-      <div lang="pt-BR" className={`pagina ${instrumentSans.className}`}>
+      <div className={`pagina ${instrumentSans.className}`}>
         <header className="topo">
           <Link href="/" className="marca">
             Menu Spoiler

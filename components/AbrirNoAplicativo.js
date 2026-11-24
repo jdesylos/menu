@@ -1,5 +1,6 @@
 import Head from "next/head";
 import { useSyncExternalStore } from "react";
+import { instrumentSans } from "lib/fonts.js";
 
 // A página de um link que quem trata é o APLICATIVO — o de ativação e o de
 // recuperação de senha.
@@ -54,7 +55,7 @@ export default function AbrirNoAplicativo({ aba, titulo, texto }) {
         <meta name="referrer" content="no-referrer" />
         <meta name="robots" content="noindex" />
       </Head>
-      <main style={estilos.pagina}>
+      <main className={instrumentSans.className} style={estilos.pagina}>
         <h1 style={estilos.titulo}>{titulo}</h1>
         <p style={estilos.texto}>{texto}</p>
         {abrir ? (
@@ -72,7 +73,6 @@ const estilos = {
     maxWidth: 480,
     margin: "0 auto",
     padding: "64px 16px",
-    fontFamily: "system-ui, sans-serif",
     color: "#0E1D26",
   },
   titulo: {

@@ -1,6 +1,6 @@
 # Licenças dos arquivos desta pasta
 
-## `InstrumentSans-Regular.ttf`, `InstrumentSans-SemiBold.ttf`
+## `InstrumentSans-Regular.ttf`, `InstrumentSans-SemiBold.ttf`, `InstrumentSans-Regular.woff2`, `InstrumentSans-SemiBold.woff2`
 
 **Instrument Sans**, de Rodrigo Fuenzalida e Jordan Egstad.
 Distribuída sob a **SIL Open Font License 1.1**: <https://openfontlicense.org/>
