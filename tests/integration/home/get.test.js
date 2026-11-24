@@ -7,7 +7,7 @@ beforeAll(async () => {
 
 describe("GET /", () => {
   describe("Anonymous user", () => {
-    test("Presents the app instead of the API", async () => {
+    test("Presents the brand, app summary and store links", async () => {
       const response = await fetch(`${webserver.origin}/`);
 
       expect(response.status).toBe(200);
@@ -16,8 +16,15 @@ describe("GET /", () => {
       const responseBody = await response.text();
 
       expect(responseBody).toContain('<html lang="pt-BR">');
+      expect(responseBody).toContain('alt="Menu Spoiler"');
       expect(responseBody).toContain("O cardápio antes de você chegar.");
-      expect(responseBody).toContain("Em breve para Android e iOS.");
+      expect(responseBody).not.toContain("Em breve para Android e iOS.");
+      expect(responseBody).toContain(
+        'href="https://apps.apple.com/br/app/menu-spoiler/id6825827914"',
+      );
+      expect(responseBody).toContain(
+        'href="https://play.google.com/store/apps/details?id=com.menuspoiler.app"',
+      );
       expect(responseBody).toContain(
         'href="mailto:contato@menuspoiler.com.br"',
       );
