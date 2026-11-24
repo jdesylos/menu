@@ -117,6 +117,25 @@ export function HistoryIcon() {
   );
 }
 
+export function SupportIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 3.5H13.5V11H6L3 13.5V11H2.5V3.5Z" />
+      <path d="M5.5 6.5H10.5M5.5 8.75H8.5" />
+    </svg>
+  );
+}
+
 export function CrownIcon() {
   return (
     <svg

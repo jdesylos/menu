@@ -4,12 +4,15 @@ import AdminLayout from "components/admin/AdminLayout.js";
 import PanelCard, { HistoryIcon } from "components/admin/PanelCard.js";
 import PlacesCockpitPanel from "components/admin/PlacesCockpitPanel.js";
 import SuggestionsCockpitPanel from "components/admin/SuggestionsCockpitPanel.js";
+import SupportCockpitPanel from "components/admin/SupportCockpitPanel.js";
 import UsersCockpitPanel from "components/admin/UsersCockpitPanel.js";
 import database from "infra/database.js";
 import { formatShortDate, hasFeature } from "lib/adminApi.js";
 import { requireAdmin } from "lib/adminAuth.js";
+import authorization from "models/authorization.js";
 import place from "models/place.js";
 import placeSuggestion from "models/placeSuggestion.js";
+import supportRequest from "models/supportRequest.js";
 import user from "models/user.js";
 
 function serialize(value) {
@@ -36,6 +39,7 @@ export async function getServerSideProps(context) {
           : "all";
 
       const canManagePlace = hasFeature(adminUser, "manage:place");
+      const canManageSupport = hasFeature(adminUser, "manage:support");
       const canReadUsers = hasFeature(adminUser, "read:user:admin");
 
       const [
@@ -43,6 +47,7 @@ export async function getServerSideProps(context) {
         auditRes,
         initialPlaces,
         initialSuggestions,
+        initialSupportRaw,
         initialUsers,
       ] = await Promise.all([
         database.query(`
@@ -50,6 +55,7 @@ export async function getServerSideProps(context) {
             (SELECT count(DISTINCT place_id)::int FROM menus) AS places_with_menus,
             (SELECT count(*)::int FROM places WHERE hidden_at IS NOT NULL) AS hidden_places,
             (SELECT count(*)::int FROM place_suggestions WHERE status = 'pending') AS pending_suggestions,
+            (SELECT count(*)::int FROM support_requests WHERE status IN ('open', 'in_progress')) AS open_support_requests,
             (SELECT count(*)::int FROM users WHERE deleted_at IS NULL) AS active_users,
             (SELECT count(*)::int FROM users WHERE deleted_at IS NULL AND 'read:activation_token' = ANY(features)) AS pending_users,
             (SELECT count(*)::int FROM users WHERE deleted_at IS NULL AND 'admin' = ANY(features)) AS admin_users
@@ -77,6 +83,14 @@ export async function getServerSideProps(context) {
         canManagePlace
           ? placeSuggestion.findAll(adminUser, { status: "pending" })
           : [],
+        canManageSupport
+          ? supportRequest.listForAdmin({
+              category: "all",
+              status: "all",
+              page: 1,
+              limit: 12,
+            })
+          : null,
         canReadUsers
           ? user.listForAdmin({
               q: usersQ,
@@ -87,12 +101,26 @@ export async function getServerSideProps(context) {
           : null,
       ]);
 
+      const initialSupportRequests = initialSupportRaw
+        ? {
+            ...initialSupportRaw,
+            items: initialSupportRaw.items.map((item) =>
+              authorization.filterOutput(
+                adminUser,
+                "read:support_request",
+                item,
+              ),
+            ),
+          }
+        : null;
+
       return {
         resumo: serialize(summaryRes.rows[0]),
         recentAudit: serialize(auditRes.rows),
         initialPlaceQuery: { q, visibility, has_menu: hasMenu },
         initialPlaces: serialize(initialPlaces),
         initialSuggestions: serialize(initialSuggestions),
+        initialSupportRequests: serialize(initialSupportRequests),
         initialUserQuery: { users_q: usersQ, users_filter: usersFilter },
         initialUsers: serialize(initialUsers),
       };
@@ -114,10 +142,13 @@ export default function AdminCockpit({
   initialPlaceQuery,
   initialPlaces,
   initialSuggestions,
+  initialSupportRequests,
   initialUserQuery,
   initialUsers,
 }) {
   const [filterCommand, setFilterCommand] = useState(null);
+  const [placePrefillCommand, setPlacePrefillCommand] = useState(null);
+  const [supportRefreshSeq, setSupportRefreshSeq] = useState(0);
   const [activePlaceFilter, setActivePlaceFilter] = useState({
     visibility: initialPlaceQuery?.visibility || "all",
     hasMenu: initialPlaceQuery?.has_menu || "all",
@@ -125,12 +156,29 @@ export default function AdminCockpit({
   const [pendingSuggestionsCount, setPendingSuggestionsCount] = useState(
     resumo?.pending_suggestions ?? 0,
   );
+  const [openSupportCount, setOpenSupportCount] = useState(
+    resumo?.open_support_requests ?? 0,
+  );
   const [adminUsersCount, setAdminUsersCount] = useState(
     resumo?.admin_users ?? 0,
   );
 
   const canManagePlace = hasFeature(adminUser, "manage:place");
+  const canManageSupport = hasFeature(adminUser, "manage:support");
   const canReadUsers = hasFeature(adminUser, "read:user:admin");
+
+  function handleCreatePlaceFromSupport(item) {
+    setPlacePrefillCommand((prev) => ({
+      seq: (prev?.seq || 0) + 1,
+      requestId: item.id,
+      name: item.place_name || "",
+      approximateAddress: item.approximate_address || "",
+      message: item.message || "",
+      latitude: item.latitude ?? null,
+      longitude: item.longitude ?? null,
+    }));
+    jumpTo("locais");
+  }
 
   const isMenuFilterActive =
     activePlaceFilter.hasMenu === "true" &&
@@ -194,6 +242,21 @@ export default function AdminCockpit({
           </div>
           <span className="adm-kpi-sub">
             {pendingSuggestionsCount > 0 ? "Revisar →" : "Fila →"}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="adm-kpi-item is-amber"
+          disabled={!canManageSupport}
+          onClick={() => jumpTo("solicitacoes")}
+        >
+          <div>
+            <span className="adm-kpi-label">Solicitações</span>
+            <span className="adm-kpi-value">{openSupportCount}</span>
+          </div>
+          <span className="adm-kpi-sub">
+            {openSupportCount > 0 ? "Atender →" : "Fila →"}
           </span>
         </button>
 
@@ -284,12 +347,23 @@ export default function AdminCockpit({
                 initialPlaces={initialPlaces}
                 filterCommand={filterCommand}
                 onFilterStateChange={setActivePlaceFilter}
+                prefillCommand={placePrefillCommand}
+                onSupportLinked={() => setSupportRefreshSeq((prev) => prev + 1)}
               />
               <SuggestionsCockpitPanel
                 initialSuggestions={initialSuggestions}
                 onPendingCountChange={setPendingSuggestionsCount}
               />
             </>
+          ) : null}
+          {canManageSupport ? (
+            <SupportCockpitPanel
+              initialRequests={initialSupportRequests}
+              canManagePlace={canManagePlace}
+              onOpenCountChange={setOpenSupportCount}
+              onCreatePlaceFromSupport={handleCreatePlaceFromSupport}
+              refreshSignal={supportRefreshSeq}
+            />
           ) : null}
         </div>
 

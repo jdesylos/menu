@@ -34,9 +34,13 @@ export default function PlacesCockpitPanel({
   initialPlaces,
   filterCommand = null,
   onFilterStateChange = null,
+  prefillCommand = null,
+  onSupportLinked = null,
 }) {
   const router = useRouter();
   const [mostrarNovo, setMostrarNovo] = useState(false);
+  const [activePrefill, setActivePrefill] = useState(null);
+  const [concluirSolicitacao, setConcluirSolicitacao] = useState(true);
   const [q, setQ] = useState(initialQuery?.q || "");
   const [visibility, setVisibility] = useState(
     initialQuery?.visibility || "all",
@@ -47,6 +51,7 @@ export default function PlacesCockpitPanel({
   const [criando, setCriando] = useState(false);
   const [erro, setErro] = useState(null);
   const lastSeqRef = useRef(0);
+  const lastPrefillSeqRef = useRef(0);
   const qRef = useRef(q);
   qRef.current = q;
 
@@ -95,6 +100,17 @@ export default function PlacesCockpitPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCommand]);
 
+  useEffect(() => {
+    if (!prefillCommand || prefillCommand.seq === lastPrefillSeqRef.current) {
+      return;
+    }
+    lastPrefillSeqRef.current = prefillCommand.seq;
+    setErro(null);
+    setActivePrefill(prefillCommand);
+    setConcluirSolicitacao(true);
+    setMostrarNovo(true);
+  }, [prefillCommand]);
+
   async function criarLocal(payload) {
     setErro(null);
     setCriando(true);
@@ -103,6 +119,24 @@ export default function PlacesCockpitPanel({
         method: "POST",
         body: payload,
       });
+      if (activePrefill?.requestId && concluirSolicitacao) {
+        try {
+          await apiFetch(
+            `/api/v1/admin/support-requests/${encodeURIComponent(activePrefill.requestId)}`,
+            {
+              method: "PATCH",
+              body: {
+                status: "resolved",
+                resolved_place_id: created.id,
+                resolution_note: "Estabelecimento cadastrado pelo painel.",
+              },
+            },
+          );
+          onSupportLinked?.();
+        } catch {
+          // O local já foi criado; segue para o detalhe normalmente.
+        }
+      }
       router.push(`/admin/estabelecimentos/${created.id}`);
     } catch (error) {
       setErro(error.message);
@@ -147,7 +181,14 @@ export default function PlacesCockpitPanel({
           ) : null}
           <button
             type="button"
-            onClick={() => setMostrarNovo((v) => !v)}
+            onClick={() => {
+              if (mostrarNovo) {
+                setMostrarNovo(false);
+                setActivePrefill(null);
+              } else {
+                setMostrarNovo(true);
+              }
+            }}
             className="adm-btn adm-btn-primary adm-btn-xs"
           >
             {mostrarNovo ? "Fechar" : "+ Novo local"}
@@ -169,14 +210,89 @@ export default function PlacesCockpitPanel({
             borderBottom: "1px solid #E3E9ED",
           }}
         >
+          {activePrefill ? (
+            <div
+              className="adm-alert adm-alert-info"
+              style={{ marginBottom: 10 }}
+            >
+              <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                Pré-preenchido a partir da solicitação de suporte
+              </div>
+              <div>
+                Endereço aproximado: {activePrefill.approximateAddress || "—"}
+                {activePrefill.message
+                  ? ` • Obs.: ${activePrefill.message}`
+                  : ""}
+                {activePrefill.latitude === null ||
+                activePrefill.latitude === undefined
+                  ? " • Sem GPS enviado (ajuste o pino no mapa)"
+                  : ""}
+              </div>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  marginTop: 6,
+                  fontSize: "0.75rem",
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={concluirSolicitacao}
+                  onChange={(event) =>
+                    setConcluirSolicitacao(event.target.checked)
+                  }
+                />
+                <span>Concluir solicitação automaticamente ao criar local</span>
+              </label>
+            </div>
+          ) : null}
+
           <PlaceForm
+            key={activePrefill ? `prefill-${activePrefill.seq}` : "new-place"}
+            initialValues={
+              activePrefill
+                ? {
+                    name: activePrefill.name || "",
+                    street: (activePrefill.approximateAddress || "").slice(
+                      0,
+                      200,
+                    ),
+                    latitude:
+                      activePrefill.latitude !== null &&
+                      activePrefill.latitude !== undefined
+                        ? activePrefill.latitude
+                        : -23.55052,
+                    longitude:
+                      activePrefill.longitude !== null &&
+                      activePrefill.longitude !== undefined
+                        ? activePrefill.longitude
+                        : -46.633308,
+                  }
+                : null
+            }
+            referencia={
+              activePrefill?.latitude !== null &&
+              activePrefill?.latitude !== undefined
+                ? {
+                    latitude: activePrefill.latitude,
+                    longitude: activePrefill.longitude,
+                    label: "Localização enviada pelo usuário",
+                  }
+                : null
+            }
             submitLabel="Criar estabelecimento"
             salvando={criando}
             onSubmit={criarLocal}
             extraActions={
               <button
                 type="button"
-                onClick={() => setMostrarNovo(false)}
+                onClick={() => {
+                  setMostrarNovo(false);
+                  setActivePrefill(null);
+                }}
                 className="adm-btn adm-btn-secondary adm-btn-sm"
               >
                 Cancelar
