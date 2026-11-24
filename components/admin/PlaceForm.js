@@ -267,6 +267,7 @@ export default function PlaceForm({
             latitude={form.latitude}
             longitude={form.longitude}
             referencia={referencia}
+            currentPlaceId={initialValues?.id || null}
             onChange={({ latitude, longitude }) => {
               setField("latitude", String(latitude));
               setField("longitude", String(longitude));
