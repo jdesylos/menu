@@ -48,6 +48,12 @@ const availableFeatures = [
   // repositório judhagsan.
   "read:place_suggestion",
 
+  // SUPPORT
+  // Atender solicitações de locais faltantes e pedidos de ajuda pelo painel.
+  "manage:support",
+  // Chave de formatação do `filterOutput` para solicitações de suporte.
+  "read:support_request",
+
   // MENU
   // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota de
   // leitura (`POST /api/v1/vision/read`) exige a mesma feature, porque quem
@@ -166,6 +172,56 @@ function filterOutput(user, feature, resource) {
       created_at: resource.created_at,
       updated_at: resource.updated_at,
     };
+  }
+
+  if (feature === "read:support_request") {
+    if (can(user, "manage:support")) {
+      return {
+        id: resource.id,
+        category: resource.category,
+        status: resource.status,
+        user_id: resource.user_id ?? null,
+        user_username: resource.user_username ?? null,
+        contact_name: resource.contact_name ?? null,
+        contact_email: resource.contact_email ?? null,
+        account_identifier: resource.account_identifier ?? null,
+        subject: resource.subject ?? null,
+        message: resource.message ?? null,
+        place_name: resource.place_name ?? null,
+        approximate_address: resource.approximate_address ?? null,
+        latitude: resource.latitude ?? null,
+        longitude: resource.longitude ?? null,
+        metadata: resource.metadata ?? {},
+        resolved_place_id: resource.resolved_place_id ?? null,
+        resolved_place_name: resource.resolved_place_name ?? null,
+        handled_by: resource.handled_by ?? null,
+        handled_username: resource.handled_username ?? null,
+        resolution_note: resource.resolution_note ?? null,
+        handled_at: resource.handled_at ?? null,
+        resolved_at: resource.resolved_at ?? null,
+        created_at: resource.created_at,
+        updated_at: resource.updated_at,
+      };
+    }
+
+    if (user.id && resource.user_id === user.id) {
+      return {
+        id: resource.id,
+        category: resource.category,
+        status: resource.status,
+        subject: resource.subject ?? null,
+        message: resource.message ?? null,
+        place_name: resource.place_name ?? null,
+        approximate_address: resource.approximate_address ?? null,
+        latitude: resource.latitude ?? null,
+        longitude: resource.longitude ?? null,
+        resolved_place_id: resource.resolved_place_id ?? null,
+        resolution_note: resource.resolution_note ?? null,
+        resolved_at: resource.resolved_at ?? null,
+        created_at: resource.created_at,
+        updated_at: resource.updated_at,
+      };
+    }
   }
 
   // Quem mandou não sai: o cardápio é do lugar, e quem lê não tem por que

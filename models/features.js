@@ -14,6 +14,7 @@ export const ADMIN_PANEL_FEATURES = [
   "admin",
   "manage:place",
   "manage:menu",
+  "manage:support",
   "read:user:admin",
   "update:user:others",
   "erase:user:others",
