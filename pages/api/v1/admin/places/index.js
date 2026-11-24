@@ -19,8 +19,21 @@ export default createRouter()
   .handler(controller.errorHandlers);
 
 async function getHandler(request, response) {
-  const result = await place.searchForAdmin(request.query);
+  const vectorTiles = Boolean(process.env.PROTOMAPS_API_KEY);
+  const mode = request.query?.mode;
+
   response.setHeader("Cache-Control", "no-store");
+
+  if (mode === "config") {
+    return response.status(200).json({ vector_tiles: vectorTiles });
+  }
+
+  if (mode === "viewport") {
+    const places = await place.findWithinViewportForAdmin(request.query);
+    return response.status(200).json({ places, vector_tiles: vectorTiles });
+  }
+
+  const result = await place.searchForAdmin(request.query);
   return response.status(200).json(result);
 }
 

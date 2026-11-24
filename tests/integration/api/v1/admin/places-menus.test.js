@@ -152,6 +152,93 @@ describe("Admin places and menus management", () => {
       },
     );
     const unused = await unusedPlaceRes.json();
+
+    // Config e viewport do mapa administrativo (locais com/sem cardápio e ocultos).
+    const mapConfigRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places?mode=config`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(mapConfigRes.status).toBe(200);
+    const mapConfig = await mapConfigRes.json();
+    expect(typeof mapConfig.vector_tiles).toBe("boolean");
+
+    const anonViewportRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places?mode=viewport&south=-23.555&north=-23.545&west=-46.638&east=-46.628`,
+    );
+    expect(anonViewportRes.status).toBe(403);
+
+    const oversizedViewportRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places?mode=viewport&south=-23.7&north=-23.4&west=-46.7&east=-46.4`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(oversizedViewportRes.status).toBe(400);
+
+    const hiddenPlaceRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({
+          name: "Local Oculto Viewport",
+          latitude: -23.5509,
+          longitude: -46.6331,
+        }),
+      },
+    );
+    expect(hiddenPlaceRes.status).toBe(201);
+    const hiddenPlace = await hiddenPlaceRes.json();
+
+    const hideViewportPlaceRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places/${hiddenPlace.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({ action: "hide", reason: "admin_removed" }),
+      },
+    );
+    expect(hideViewportPlaceRes.status).toBe(200);
+
+    const viewportRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places?mode=viewport&south=-23.555&north=-23.545&west=-46.638&east=-46.628`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(viewportRes.status).toBe(200);
+    const viewportBody = await viewportRes.json();
+    expect(typeof viewportBody.vector_tiles).toBe("boolean");
+    const unusedInViewport = viewportBody.places.find(
+      (item) => item.id === unused.id,
+    );
+    const hiddenInViewport = viewportBody.places.find(
+      (item) => item.id === hiddenPlace.id,
+    );
+    expect(unusedInViewport).toMatchObject({
+      id: unused.id,
+      has_menu: false,
+      hidden_at: null,
+    });
+    expect(hiddenInViewport).toMatchObject({
+      id: hiddenPlace.id,
+      has_menu: false,
+      hidden_reason: "admin_removed",
+    });
+    expect(hiddenInViewport.hidden_at).toEqual(expect.any(String));
+
+    const createdLat = Number(createdPlace.latitude);
+    const createdLng = Number(createdPlace.longitude);
+    const menuViewportRes = await fetch(
+      `${webserver.origin}/api/v1/admin/places?mode=viewport&south=${createdLat - 0.005}&north=${createdLat + 0.005}&west=${createdLng - 0.005}&east=${createdLng + 0.005}`,
+      { headers: { Cookie: cookie } },
+    );
+    expect(menuViewportRes.status).toBe(200);
+    const menuViewportBody = await menuViewportRes.json();
+    const createdInViewport = menuViewportBody.places.find(
+      (item) => item.id === createdPlace.id,
+    );
+    expect(createdInViewport).toMatchObject({
+      id: createdPlace.id,
+      has_menu: true,
+    });
+
     const okDelete = await fetch(
       `${webserver.origin}/api/v1/admin/places/${unused.id}`,
       { method: "DELETE", headers: { Cookie: cookie } },

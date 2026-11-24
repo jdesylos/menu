@@ -609,6 +609,80 @@ async function searchForAdmin(query = {}) {
   };
 }
 
+const MAX_ADMIN_VIEWPORT_SPAN = 0.15;
+
+// Consulta por janela visível para desenhar no mapa administrativo os locais já
+// existentes no banco (com ou sem cardápio, inclusive excluídos), sem o cache
+// de 1h da rota pública.
+async function findWithinViewportForAdmin(query = {}) {
+  const south = Number(query?.south);
+  const north = Number(query?.north);
+  const west = Number(query?.west);
+  const east = Number(query?.east);
+
+  const validNumbers =
+    Number.isFinite(south) &&
+    Number.isFinite(north) &&
+    Number.isFinite(west) &&
+    Number.isFinite(east) &&
+    south >= -LATITUDE_LIMIT &&
+    north <= LATITUDE_LIMIT &&
+    west >= -LONGITUDE_LIMIT &&
+    east <= LONGITUDE_LIMIT &&
+    south < north &&
+    west < east;
+
+  if (!validNumbers) {
+    throw new ValidationError({
+      message: "Os limites de área do mapa são inválidos.",
+      action: "Informe south, north, west e east válidos.",
+    });
+  }
+
+  if (
+    north - south > MAX_ADMIN_VIEWPORT_SPAN ||
+    east - west > MAX_ADMIN_VIEWPORT_SPAN
+  ) {
+    throw new ValidationError({
+      message: "A área solicitada é grande demais para listar locais no mapa.",
+      action: "Aproxime mais o zoom do mapa (nível 14 ou superior).",
+    });
+  }
+
+  const results = await database.query({
+    text: `
+      SELECT
+        places.id,
+        places.name,
+        places.category,
+        places.latitude,
+        places.longitude,
+        places.street,
+        places.neighborhood,
+        places.locality,
+        places.region,
+        places.hidden_at,
+        places.hidden_reason,
+        EXISTS (
+          SELECT 1 FROM menus WHERE menus.place_id = places.id
+        ) AS has_menu
+      FROM
+        places
+      WHERE
+        places.latitude BETWEEN $1 AND $2
+        AND places.longitude BETWEEN $3 AND $4
+      ORDER BY
+        (places.hidden_at IS NULL) DESC,
+        places.id ASC
+      LIMIT
+        $5
+    ;`,
+    values: [south, north, west, east, MAX_PLACES_PER_TILE],
+  });
+
+  return results.rows;
+}
+
 async function createByAdmin(input) {
   const values = parseAdminPlaceInput(input, { requireCoreFields: true });
   const id = crypto.randomUUID();
@@ -877,6 +951,7 @@ const place = {
   parseOrigin,
   search,
   searchForAdmin,
+  findWithinViewportForAdmin,
   findOneById,
   createByAdmin,
   updateByAdmin,

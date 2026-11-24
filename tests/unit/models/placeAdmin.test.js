@@ -114,4 +114,59 @@ describe("models/place.js admin methods", () => {
       ConflictError,
     );
   });
+
+  test(".findWithinViewportForAdmin() validates bounds/span and queries viewport places", async () => {
+    await expect(
+      place.findWithinViewportForAdmin({
+        south: -23.54,
+        north: -23.55,
+        west: -46.64,
+        east: -46.62,
+      }),
+    ).rejects.toMatchObject({ name: "ValidationError" });
+
+    await expect(
+      place.findWithinViewportForAdmin({
+        south: -23.7,
+        north: -23.5,
+        west: -46.64,
+        east: -46.62,
+      }),
+    ).rejects.toMatchObject({ name: "ValidationError" });
+
+    const mockRows = [
+      {
+        id: PLACE_ID,
+        name: "Bistrô Viewport",
+        category: "restaurant",
+        latitude: -23.55,
+        longitude: -46.63,
+        street: "Rua Teste, 10",
+        neighborhood: "Centro",
+        locality: "São Paulo",
+        hidden_at: null,
+        hidden_reason: null,
+        has_menu: true,
+      },
+    ];
+    database.query.mockResolvedValueOnce({
+      rowCount: 1,
+      rows: mockRows,
+    });
+
+    const rows = await place.findWithinViewportForAdmin({
+      south: -23.56,
+      north: -23.54,
+      west: -46.64,
+      east: -46.62,
+    });
+
+    expect(rows).toEqual(mockRows);
+    expect(database.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining("EXISTS"),
+        values: [-23.56, -23.54, -46.64, -46.62, 300],
+      }),
+    );
+  });
 });
