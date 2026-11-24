@@ -41,7 +41,18 @@ describe("models/supportRequest.js", () => {
     });
   });
 
-  test("create allows missing_place without coordinates and without login", async () => {
+  test("create requires login for missing_place and auto-populates user details", async () => {
+    await expect(
+      supportRequest.create(
+        { features: ["create:session"] },
+        {
+          category: "missing_place",
+          place_name: "Boteco Central",
+          approximate_address: "Perto da praça da Sé",
+        },
+      ),
+    ).rejects.toMatchObject({ statusCode: 401 });
+
     database.query.mockResolvedValue({
       rows: [
         {
@@ -57,7 +68,12 @@ describe("models/supportRequest.js", () => {
     });
 
     const created = await supportRequest.create(
-      { features: ["create:session"] },
+      {
+        id: "user-1",
+        username: "maria",
+        email: "maria@menuspoiler.com.br",
+        features: ["read:session"],
+      },
       {
         category: "missing_place",
         place_name: "Boteco Central",
@@ -69,7 +85,9 @@ describe("models/supportRequest.js", () => {
     expect(database.query).toHaveBeenCalledTimes(1);
     const values = database.query.mock.calls[0][0].values;
     expect(values[0]).toBe("missing_place");
-    expect(values[1]).toBeNull();
+    expect(values[1]).toBe("user-1");
+    expect(values[2]).toBe("maria");
+    expect(values[3]).toBe("maria@menuspoiler.com.br");
     expect(values[7]).toBe("Boteco Central");
     expect(values[8]).toBe("Perto da praça da Sé");
     expect(values[9]).toBeNull();
@@ -77,8 +95,13 @@ describe("models/supportRequest.js", () => {
   });
 
   test("create validates coordinate pairs and rejects unknown sensitive fields like password", async () => {
+    const authUser = {
+      id: "user-1",
+      username: "maria",
+      email: "maria@menuspoiler.com.br",
+    };
     await expect(
-      supportRequest.create(null, {
+      supportRequest.create(authUser, {
         category: "missing_place",
         place_name: "Café",
         approximate_address: "Rua X",
@@ -87,7 +110,7 @@ describe("models/supportRequest.js", () => {
     ).rejects.toMatchObject({ statusCode: 400 });
 
     await expect(
-      supportRequest.create(null, {
+      supportRequest.create(authUser, {
         category: "missing_place",
         place_name: "Café",
         approximate_address: "Rua X",

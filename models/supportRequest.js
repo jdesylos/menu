@@ -1,5 +1,9 @@
 import database from "infra/database.js";
-import { NotFoundError, ValidationError } from "infra/errors.js";
+import {
+  NotFoundError,
+  UnauthorizedError,
+  ValidationError,
+} from "infra/errors.js";
 import { CONTATO_SUPORTE } from "lib/identidade.js";
 import place from "models/place.js";
 
@@ -167,6 +171,12 @@ function validateCreateInput(user, rawInput) {
   const { latitude, longitude } = parseOptionalCoordinates(rawInput);
 
   if (category === "missing_place") {
+    if (!user?.id) {
+      throw new UnauthorizedError({
+        message: "Você precisa estar conectado para sugerir um local no mapa.",
+        action: "Entre na sua conta e tente novamente.",
+      });
+    }
     if (!placeName) {
       throw new ValidationError({
         message: "Informe o nome do estabelecimento que não foi encontrado.",
@@ -195,11 +205,25 @@ function validateCreateInput(user, rawInput) {
     }
   }
 
+  const resolvedContactName =
+    contactName ||
+    (user?.id && typeof user.username === "string"
+      ? cleanOptionalText(user.username, {
+          maxLength: 120,
+          fieldLabel: "nome de contato",
+        })
+      : null);
+  const resolvedContactEmail =
+    contactEmail ||
+    (user?.id && typeof user.email === "string"
+      ? parseOptionalEmail(user.email)
+      : null);
+
   return {
     category,
     userId: user?.id || null,
-    contactName,
-    contactEmail,
+    contactName: resolvedContactName,
+    contactEmail: resolvedContactEmail,
     accountIdentifier: category === "account_help" ? accountIdentifier : null,
     subject,
     message,
@@ -541,7 +565,7 @@ function getSupportInfo() {
         id: "missing_place",
         title: "Não encontro o local",
         description:
-          "Informe o nome e o endereço aproximado do estabelecimento. A localização do aparelho é usada apenas como referência opcional.",
+          "Entre na sua conta e informe o nome e o endereço aproximado do estabelecimento. A localização do aparelho é usada apenas como referência opcional.",
       },
       {
         id: "account_help",
@@ -570,7 +594,7 @@ function getSupportInfo() {
         id: "missing_place",
         title: "Estabelecimento não aparece no mapa",
         steps: [
-          "Toque em Não encontro o local e informe o nome e a rua ou bairro aproximados.",
+          "Entre na sua conta, toque em Não encontro o local e informe o nome e a rua ou bairro aproximados.",
           "Autorize a localização se desejar enviar sua posição atual como referência.",
           "Nossa equipe valida as informações antes de publicar o estabelecimento no mapa.",
         ],

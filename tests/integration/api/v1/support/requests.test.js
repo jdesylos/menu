@@ -36,15 +36,40 @@ describe("Support info & public/user requests (Cláusula 1.2)", () => {
     expect(body.guidance.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("Allows anonymous missing_place without GPS and account_help without login, without auto-publishing places", async () => {
-    const missingPlace = await submitRequest({
+  test("Requires login for missing_place (auto-collecting user) while allowing anonymous help with email", async () => {
+    const anonMissingPlace = await submitRequest({
       category: "missing_place",
       place_name: "Lanchonete Esquina Feliz",
       approximate_address: "Perto da estação Pinheiros",
     });
+    expect(anonMissingPlace.status).toBe(401);
+
+    const reporter = await orchestrator.activateUser(
+      await orchestrator.createUser({ username: "sugeridor_mapa" }),
+    );
+    const reporterSess = await orchestrator.createSession(reporter);
+
+    const missingPlace = await submitRequest(
+      {
+        category: "missing_place",
+        place_name: "Lanchonete Esquina Feliz",
+        approximate_address: "Perto da estação Pinheiros",
+      },
+      reporterSess,
+    );
     expect(missingPlace.status).toBe(201);
     expect(missingPlace.body.request.category).toBe("missing_place");
     expect(missingPlace.body.request.status).toBe("open");
+
+    const savedRow = await database.query({
+      text: "SELECT user_id, contact_name, contact_email FROM support_requests WHERE id = $1;",
+      values: [missingPlace.body.request.id],
+    });
+    expect(savedRow.rows[0]).toEqual({
+      user_id: reporter.id,
+      contact_name: reporter.username,
+      contact_email: reporter.email,
+    });
 
     // Não pode publicar automaticamente em places.
     const placesRes = await fetch(
@@ -53,14 +78,17 @@ describe("Support info & public/user requests (Cláusula 1.2)", () => {
     const placesBody = await placesRes.json();
     expect(placesBody.places).toEqual([]);
 
-    const missingPlaceWithGps = await submitRequest({
-      category: "missing_place",
-      place_name: "Cantina Boa Massa",
-      approximate_address: "Rua dos Pinheiros altura do 400",
-      latitude: -23.5665,
-      longitude: -46.6842,
-      message: "Fica ao lado da farmácia",
-    });
+    const missingPlaceWithGps = await submitRequest(
+      {
+        category: "missing_place",
+        place_name: "Cantina Boa Massa",
+        approximate_address: "Rua dos Pinheiros altura do 400",
+        latitude: -23.5665,
+        longitude: -46.6842,
+        message: "Fica ao lado da farmácia",
+      },
+      reporterSess,
+    );
     expect(missingPlaceWithGps.status).toBe(201);
 
     const anonAccountHelp = await submitRequest({

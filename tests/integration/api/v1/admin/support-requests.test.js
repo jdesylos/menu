@@ -39,7 +39,10 @@ describe("Admin support requests queue & place creation flow", () => {
       `${webserver.origin}/api/v1/support/requests`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `session_id=${regularSess.token}`,
+        },
         body: JSON.stringify({
           category: "missing_place",
           place_name: "Padaria Nova Esperança",
