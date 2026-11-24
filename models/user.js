@@ -367,6 +367,17 @@ async function erase(userId) {
         WHERE
           user_id IN (SELECT id FROM erased)
       ),
+      anonymized_support_requests AS (
+        UPDATE
+          support_requests
+        SET
+          contact_name = NULL,
+          contact_email = NULL,
+          account_identifier = NULL,
+          updated_at = timezone('utc', now())
+        WHERE
+          user_id IN (SELECT id FROM erased)
+      ),
       anonymized_audit_logs AS (
         UPDATE
           audit_logs
