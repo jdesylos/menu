@@ -32,6 +32,18 @@ async function auditActions(userId) {
 
 describe("POST /api/v1/users", () => {
   describe("Anonymous user", () => {
+    test("Without required fields", async () => {
+      const response = await fetch(`${webserver.origin}/api/v1/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.name).toBe("ValidationError");
+    });
+
     test("With unique and valid data", async () => {
       const response = await fetch(`${webserver.origin}/api/v1/users`, {
         method: "POST",

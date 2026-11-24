@@ -11,6 +11,18 @@ beforeAll(async () => {
 });
 
 describe("DELETE /api/v1/sessions", () => {
+  describe("Anonymous user", () => {
+    test("Without session cookie", async () => {
+      const response = await fetch(`${webserver.origin}/api/v1/sessions`, {
+        method: "DELETE",
+      });
+
+      expect(response.status).toBe(401);
+      const responseBody = await response.json();
+      expect(responseBody.name).toBe("UnauthorizedError");
+    });
+  });
+
   describe("Default user", () => {
     test("With nonexistent session", async () => {
       const nonexistentToken =

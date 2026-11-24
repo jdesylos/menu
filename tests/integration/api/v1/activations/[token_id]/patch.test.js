@@ -12,6 +12,19 @@ beforeAll(async () => {
 
 describe("PATCH /api/v1/activations/[token_id]", () => {
   describe("Anonymous user", () => {
+    test("With malformed token", async () => {
+      const response = await fetch(
+        `${webserver.origin}/api/v1/activations/nao-e-um-uuid`,
+        {
+          method: "PATCH",
+        },
+      );
+
+      expect(response.status).toBe(404);
+      const responseBody = await response.json();
+      expect(responseBody.name).toBe("NotFoundError");
+    });
+
     test("With nonexistent token", async () => {
       const response = await fetch(
         `${webserver.origin}/api/v1/activations/256bc49a-132a-42e4-8334-998fd17ee71e`,

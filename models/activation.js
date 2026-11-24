@@ -10,7 +10,31 @@ import { NotFoundError, ForbiddenError } from "infra/errors.js";
 // porta nova — quem lê o email já recupera a senha por ele.
 const EXPIRATION_IN_MILLISECONDS = 60 * 60 * 24 * 1000; // 24 hours
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const ACTIVATED_FEATURES = [
+  "create:session",
+  "read:session",
+  "update:user",
+  "create:place",
+  "update:place",
+  "create:menu",
+];
+
+function tokenNotFoundError() {
+  return new NotFoundError({
+    message:
+      "O token de ativação utilizado não foi encontrado no sistema ou expirou.",
+    action: "Faça um novo cadastro.",
+  });
+}
+
 async function findOneValidById(tokenId) {
+  if (typeof tokenId !== "string" || !UUID_PATTERN.test(tokenId)) {
+    throw tokenNotFoundError();
+  }
+
   const activationTokenObject = await runSelectQuery(tokenId);
 
   return activationTokenObject;
@@ -33,15 +57,90 @@ async function findOneValidById(tokenId) {
     });
 
     if (results.rowCount === 0) {
-      throw new NotFoundError({
-        message:
-          "O token de ativação utilizado não foi encontrado no sistema ou expirou.",
-        action: "Faça um novo cadastro.",
-      });
+      throw tokenNotFoundError();
     }
 
     return results.rows[0];
   }
+}
+
+// Consome o token e ativa a conta numa instrução só, evitando corrida entre
+// duas chamadas simultâneas ao mesmo link.
+async function activateByTokenId(tokenId) {
+  if (typeof tokenId !== "string" || !UUID_PATTERN.test(tokenId)) {
+    throw tokenNotFoundError();
+  }
+
+  const results = await database.query({
+    text: `
+      WITH valid_token AS (
+        SELECT
+          id,
+          user_id
+        FROM
+          user_activation_tokens
+        WHERE
+          id = $1
+          AND expires_at > NOW()
+          AND used_at IS NULL
+        FOR UPDATE
+      ),
+      activated_user AS (
+        UPDATE
+          users
+        SET
+          features = $2,
+          updated_at = timezone('utc', now())
+        WHERE
+          id IN (SELECT user_id FROM valid_token)
+          AND 'read:activation_token' = ANY(features)
+        RETURNING
+          id
+      ),
+      spent_token AS (
+        UPDATE
+          user_activation_tokens
+        SET
+          used_at = timezone('utc', now()),
+          updated_at = timezone('utc', now())
+        WHERE
+          id IN (SELECT id FROM valid_token)
+          AND user_id IN (SELECT id FROM activated_user)
+        RETURNING
+          id,
+          used_at,
+          user_id,
+          expires_at,
+          created_at,
+          updated_at
+      )
+      SELECT
+        spent_token.id,
+        spent_token.used_at,
+        spent_token.user_id,
+        spent_token.expires_at,
+        spent_token.created_at,
+        spent_token.updated_at
+      FROM
+        valid_token
+        LEFT JOIN spent_token ON spent_token.id = valid_token.id
+    ;`,
+    values: [tokenId, ACTIVATED_FEATURES],
+  });
+
+  if (results.rowCount === 0) {
+    throw tokenNotFoundError();
+  }
+
+  const row = results.rows[0];
+  if (!row.id) {
+    throw new ForbiddenError({
+      message: "Você não pode mais utilizar tokens de ativação.",
+      action: "Entre em contato com o suporte.",
+    });
+  }
+
+  return row;
 }
 
 async function create(userId) {
@@ -101,14 +200,7 @@ async function activateUserByUserId(userId) {
     });
   }
 
-  const activatedUser = await user.setFeatures(userId, [
-    "create:session",
-    "read:session",
-    "update:user",
-    "create:place",
-    "update:place",
-    "create:menu",
-  ]);
+  const activatedUser = await user.setFeatures(userId, ACTIVATED_FEATURES);
   return activatedUser;
 }
 
@@ -158,6 +250,7 @@ Equipe Menu Spoiler`,
 
 const activation = {
   findOneValidById,
+  activateByTokenId,
   create,
   markTokenAsUsed,
   activateUserByUserId,

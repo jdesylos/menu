@@ -20,23 +20,19 @@ const NO_STORE = "no-store, no-cache, max-age=0, must-revalidate";
 
 async function getHandler(request, response) {
   const userTryingToGet = request.context.user;
-  const sessionToken = request.cookies.session_id;
+  const sessionObject =
+    request.context.session ||
+    (await session.findOneValidByToken(request.cookies.session_id));
 
-  const sessionObject = await session.findOneValidByToken(sessionToken);
   const renewedSessionObject = await session.renew(sessionObject.id);
   controller.setSessionCookie(renewedSessionObject.token, response);
 
-  const userFound = await user.findOneById(sessionObject.user_id);
-
-  response.setHeader(
-    "Cache-Control",
-    "no-store, no-cache, max-age=0, must-revalidate",
-  );
+  response.setHeader("Cache-Control", NO_STORE);
 
   const secureOutputValues = authorization.filterOutput(
     userTryingToGet,
     "read:user:self",
-    userFound,
+    userTryingToGet,
   );
 
   return response.status(200).json(secureOutputValues);

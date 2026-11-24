@@ -96,8 +96,11 @@ async function findOneByEmail(email) {
 }
 
 async function create(userInputValues) {
-  await validateUniqueUsername(userInputValues.username);
-  await validateUniqueEmail(userInputValues.email);
+  validateCreateInput(userInputValues);
+  await validateUniqueUsernameAndEmail(
+    userInputValues.username,
+    userInputValues.email,
+  );
   await hashPasswordInObject(userInputValues);
   injectDefaultFeaturesInObject(userInputValues);
 
@@ -105,27 +108,105 @@ async function create(userInputValues) {
   return newUser;
 
   async function runInsertQuery(userInputValues) {
-    const results = await database.query({
-      text: `
-        INSERT INTO
-          users (username, email, password, features)
-        VALUES
-          ($1, $2, $3, $4)
-        RETURNING
-          *
-        ;`,
-      values: [
-        userInputValues.username,
-        userInputValues.email,
-        userInputValues.password,
-        userInputValues.features,
-      ],
-    });
-    return results.rows[0];
+    try {
+      const results = await database.query({
+        text: `
+          INSERT INTO
+            users (username, email, password, features)
+          VALUES
+            ($1, $2, $3, $4)
+          RETURNING
+            *
+          ;`,
+        values: [
+          userInputValues.username,
+          userInputValues.email,
+          userInputValues.password,
+          userInputValues.features,
+        ],
+      });
+      return results.rows[0];
+    } catch (error) {
+      if (error.cause?.code === "23505") {
+        const constraint = error.cause?.constraint || "";
+        if (constraint.includes("username")) {
+          throw usernameTakenError();
+        }
+        if (constraint.includes("email")) {
+          throw emailTakenError();
+        }
+      }
+      throw error;
+    }
   }
 
   function injectDefaultFeaturesInObject(userInputValues) {
     userInputValues.features = ["read:activation_token"];
+  }
+}
+
+function validateCreateInput(userInputValues) {
+  if (
+    typeof userInputValues?.username !== "string" ||
+    userInputValues.username.trim().length === 0
+  ) {
+    throw new ValidationError({
+      message: "O username não foi informado.",
+      action: "Informe um username para realizar o cadastro.",
+    });
+  }
+
+  if (
+    typeof userInputValues?.email !== "string" ||
+    userInputValues.email.trim().length === 0
+  ) {
+    throw new ValidationError({
+      message: "O email não foi informado.",
+      action: "Informe um email para realizar o cadastro.",
+    });
+  }
+
+  if (
+    typeof userInputValues?.password !== "string" ||
+    userInputValues.password.length === 0
+  ) {
+    throw new ValidationError({
+      message: "A senha não foi informada.",
+      action: "Informe uma senha para realizar o cadastro.",
+    });
+  }
+}
+
+async function validateUniqueUsernameAndEmail(username, email) {
+  const results = await database.query({
+    text: `
+      SELECT
+        EXISTS (
+          SELECT
+            1
+          FROM
+            users
+          WHERE
+            LOWER(username) = LOWER($1)
+        ) AS username_taken,
+        EXISTS (
+          SELECT
+            1
+          FROM
+            users
+          WHERE
+            LOWER(email) = LOWER($2)
+        ) AS email_taken
+    ;`,
+    values: [username, email],
+  });
+
+  if (results.rows[0].username_taken) {
+    throw usernameTakenError();
+  }
+
+  if (results.rows[0].email_taken) {
+    throw emailTakenError();
   }
 }
 
@@ -157,25 +238,11 @@ function usernameTakenError() {
   });
 }
 
-async function validateUniqueEmail(email) {
-  const results = await database.query({
-    text: `
-      SELECT
-        email
-      FROM
-        users
-      WHERE
-        LOWER(email) = LOWER($1)
-      ;`,
-    values: [email],
+function emailTakenError() {
+  return new ValidationError({
+    message: "O email informado já está sendo utilizado.",
+    action: "Utilize outro email para realizar esta operação.",
   });
-
-  if (results.rowCount > 0) {
-    throw new ValidationError({
-      message: "O email informado já está sendo utilizado.",
-      action: "Utilize outro email para realizar esta operação.",
-    });
-  }
 }
 
 async function hashPasswordInObject(userInputValues) {
@@ -448,7 +515,7 @@ const USERNAME_MAX_LENGTH = 30;
 //
 // Não pede a senha, ao contrário da troca de senha: o nome não abre a conta,
 // e quem está com a sessão já pode fazer o que ele faria com ela.
-async function changeUsername({ userId, newUsername }) {
+async function changeUsername({ userId, newUsername, currentUser = null }) {
   if (typeof newUsername !== "string" || newUsername.trim().length === 0) {
     throw new ValidationError({
       message: "O nome de usuário não foi informado.",
@@ -464,15 +531,26 @@ async function changeUsername({ userId, newUsername }) {
     });
   }
 
-  const currentUser = await findOneById(userId);
-  if (currentUser.username === username) {
-    throw new ValidationError({
-      message: "O nome de usuário novo é igual ao atual.",
-      action: "Escolha um nome diferente do atual.",
-    });
+  if (currentUser) {
+    if (currentUser.username === username) {
+      throw new ValidationError({
+        message: "O nome de usuário novo é igual ao atual.",
+        action: "Escolha um nome diferente do atual.",
+      });
+    }
+    await validateUniqueUsername(username, userId);
+  } else {
+    const [storedUser] = await Promise.all([
+      findOneById(userId),
+      validateUniqueUsername(username, userId),
+    ]);
+    if (storedUser.username === username) {
+      throw new ValidationError({
+        message: "O nome de usuário novo é igual ao atual.",
+        action: "Escolha um nome diferente do atual.",
+      });
+    }
   }
-
-  await validateUniqueUsername(username, userId);
 
   let results;
   try {

@@ -40,7 +40,12 @@ export default createRouter()
   .handler(controller.errorHandlers);
 
 async function postHandler(request, response) {
-  const userInputValues = request.body;
+  const userInputValues =
+    request.body &&
+    typeof request.body === "object" &&
+    !Array.isArray(request.body)
+      ? { ...request.body }
+      : {};
   const ip = controller.getClientIp(request);
 
   let newUser;
