@@ -579,10 +579,116 @@ function getSupportInfo() {
   };
 }
 
+// Escalonamento sanitizado da recuperação sem e-mail (Cláusula 1.4): evita
+// duplicar chamados em aberto quando o mesmo solicitante reenvia para o mesmo alvo.
+async function createRecoveryEscalation({
+  userId = null,
+  contactEmail,
+  accountIdentifier,
+  subject,
+  message,
+  metadata = {},
+}) {
+  return await database.withTransaction(async (client) => {
+    const isAbuse = metadata?.reason === "abuse_rate_limit";
+    const existing = await client.query({
+      text: `
+        SELECT
+          id,
+          metadata
+        FROM
+          support_requests
+        WHERE
+          category = 'account_help'
+          AND status IN ('open', 'in_progress')
+          AND metadata->>'source' = 'recovery_without_email'
+          AND (
+            $4::boolean = true
+            OR LOWER(COALESCE(contact_email, '')) = LOWER($1)
+          )
+          AND (
+            ($2::uuid IS NOT NULL AND user_id = $2::uuid)
+            OR LOWER(COALESCE(account_identifier, '')) = LOWER($3)
+          )
+          AND created_at > NOW() - INTERVAL '24 hours'
+        ORDER BY
+          created_at DESC
+        LIMIT 1
+        FOR UPDATE
+      ;`,
+      values: [contactEmail, userId, accountIdentifier, isAbuse],
+    });
+
+    if (existing.rowCount > 0) {
+      const currentMeta = existing.rows[0].metadata || {};
+      const nextCount = Number(currentMeta.attempt_count || 1) + 1;
+      const mergedMeta = {
+        ...currentMeta,
+        ...metadata,
+        attempt_count: nextCount,
+      };
+
+      const updated = await client.query({
+        text: `
+          UPDATE
+            support_requests
+          SET
+            user_id = COALESCE(user_id, $2),
+            message = $3,
+            metadata = $4::jsonb,
+            updated_at = timezone('utc', now())
+          WHERE
+            id = $1
+          RETURNING
+            *
+        ;`,
+        values: [
+          existing.rows[0].id,
+          userId,
+          message,
+          JSON.stringify(mergedMeta),
+        ],
+      });
+
+      return updated.rows[0];
+    }
+
+    const initialMeta = {
+      ...metadata,
+      attempt_count: 1,
+    };
+
+    const inserted = await client.query({
+      text: `
+        INSERT INTO
+          support_requests (
+            category, status, user_id, contact_email,
+            account_identifier, subject, message, metadata
+          )
+        VALUES
+          ('account_help', 'open', $1, $2, $3, $4, $5, $6::jsonb)
+        RETURNING
+          *
+      ;`,
+      values: [
+        userId,
+        contactEmail,
+        accountIdentifier,
+        subject,
+        message,
+        JSON.stringify(initialMeta),
+      ],
+    });
+
+    return inserted.rows[0];
+  });
+}
+
 const supportRequest = {
   CATEGORIES,
   STATUSES,
   create,
+  createRecoveryEscalation,
   listForUser,
   listForAdmin,
   updateByAdmin,
