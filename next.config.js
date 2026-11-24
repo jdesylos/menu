@@ -70,6 +70,16 @@ module.exports = {
           },
         ],
       },
+      {
+        source:
+          "/:file(favicon\\.ico|favicon-32x32\\.png|icon-192\\.png|apple-touch-icon\\.png)",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=86400, s-maxage=86400",
+          },
+        ],
+      },
     ];
   },
 };
