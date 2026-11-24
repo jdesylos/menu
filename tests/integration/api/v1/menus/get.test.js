@@ -103,7 +103,9 @@ describe("GET /api/v1/menus", () => {
       // Quem acabou de mandar espera ver o que mandou no aparelho; anônimos
       // recebem cache na borda da Vercel por etiqueta.
       expect(cacheControl).toContain("no-store");
-      expect(vary).toBe("Cookie");
+      expect(vary.split(",").map((header) => header.trim())).toContain(
+        "Cookie",
+      );
       expect(vercelCdnCacheControl).toContain("s-maxage");
       expect(vercelCacheTag).toBe(`menu-${placeId}`);
     });
