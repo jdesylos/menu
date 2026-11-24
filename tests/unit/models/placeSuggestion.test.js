@@ -120,6 +120,7 @@ describe("models/placeSuggestion.js", () => {
       expect(cdn.forget).toHaveBeenCalledTimes(1);
       expect(cdn.forget).toHaveBeenCalledWith([
         ...TILES_DA_RAUL_SADDI_66,
+        `place-share-${placeId}`,
         `menu-${placeId}`,
       ]);
     });
@@ -148,6 +149,7 @@ describe("models/placeSuggestion.js", () => {
         "places-16-24264-37184",
         "places-17-48528-74369",
         "places-18-97056-148739",
+        `place-share-${pedido.place_id}`,
       ]);
     });
 

@@ -346,6 +346,9 @@ async function review(user, id, status) {
   // tile ainda com o dado velho, e a borda o guardaria por mais uma hora.
   if (applied.positions.length > 0) {
     const tags = cacheTagsOf(applied.positions);
+    if (applied.placeId && updated.kind !== "create") {
+      tags.push(place.shareCacheTag(applied.placeId));
+    }
     if (applied.hidePlace && applied.placeId) {
       tags.push(menu.cacheTag(applied.placeId));
     }

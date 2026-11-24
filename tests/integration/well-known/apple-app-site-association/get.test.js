@@ -27,6 +27,7 @@ describe("GET /.well-known/apple-app-site-association", () => {
               components: [
                 { "/": "/cadastro/ativar/*" },
                 { "/": "/senha/recuperar/*" },
+                { "/": "/cardapio/*" },
               ],
             },
           ],

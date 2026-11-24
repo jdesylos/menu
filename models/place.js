@@ -267,6 +267,11 @@ function cacheTagsOf({ latitude, longitude }) {
   return tags;
 }
 
+// Etiqueta da página pública de compartilhamento do lugar na borda.
+function shareCacheTag(id) {
+  return `place-share-${id}`;
+}
+
 // Um lugar pelo id, visível ou não — quem chama decide o que fazer com o
 // oculto. Sem o lugar, `NotFoundError`, com o texto que o aplicativo mostra.
 async function findOneById(id) {
@@ -317,6 +322,7 @@ const place = {
   findWithinTile,
   cacheTag,
   cacheTagsOf,
+  shareCacheTag,
   parseSearch,
   parseOrigin,
   search,

@@ -102,4 +102,12 @@ describe("models/place.js", () => {
       ).toContain(place.cacheTag(coordinates));
     });
   });
+
+  describe(".shareCacheTag()", () => {
+    test("with a place id", () => {
+      expect(place.shareCacheTag("27bdd19d-0f4c-4348-af8a-fe5589cab839")).toBe(
+        "place-share-27bdd19d-0f4c-4348-af8a-fe5589cab839",
+      );
+    });
+  });
 });
