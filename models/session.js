@@ -3,6 +3,7 @@ import database from "infra/database.js";
 import { UnauthorizedError } from "infra/errors";
 
 const EXPIRATION_IN_MILLISECONDS = 60 * 60 * 24 * 30 * 1000; // 30 Days
+const ADMIN_EXPIRATION_IN_MILLISECONDS = 60 * 60 * 24 * 7 * 1000; // 7 Days
 
 async function findOneValidByToken(sessionToken) {
   const sessionFound = await runSelectQuery(sessionToken);
@@ -36,9 +37,12 @@ async function findOneValidByToken(sessionToken) {
   }
 }
 
-async function create(userId) {
+async function create(
+  userId,
+  { expirationMs = EXPIRATION_IN_MILLISECONDS } = {},
+) {
   const token = crypto.randomBytes(48).toString("hex");
-  const expiresAt = new Date(Date.now() + EXPIRATION_IN_MILLISECONDS);
+  const expiresAt = new Date(Date.now() + expirationMs);
 
   const newSession = await runInsertQuery(token, userId, expiresAt);
   return newSession;
@@ -60,8 +64,11 @@ async function create(userId) {
   }
 }
 
-async function renew(sessionId) {
-  const expiresAt = new Date(Date.now() + EXPIRATION_IN_MILLISECONDS);
+async function renew(
+  sessionId,
+  { expirationMs = EXPIRATION_IN_MILLISECONDS } = {},
+) {
+  const expiresAt = new Date(Date.now() + expirationMs);
 
   const renewedSessionObject = await runUpdateQuery(sessionId, expiresAt);
   return renewedSessionObject;
@@ -116,6 +123,7 @@ const session = {
   renew,
   expireById,
   EXPIRATION_IN_MILLISECONDS,
+  ADMIN_EXPIRATION_IN_MILLISECONDS,
 };
 
 export default session;
