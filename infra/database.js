@@ -132,6 +132,33 @@ async function closeSharedClient(scope) {
   }
 }
 
+async function withTransaction(callback) {
+  const scope = sharedClientScope.getStore();
+  if (scope && !scope.closed) {
+    const client = await getSharedClient(scope);
+    return await runInTransaction(client, callback);
+  }
+
+  const client = await database.getNewClient();
+  try {
+    return await runInTransaction(client, callback);
+  } finally {
+    await client.end();
+  }
+}
+
+async function runInTransaction(client, callback) {
+  await client.query("BEGIN");
+  try {
+    const result = await callback(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  }
+}
+
 async function getNewClient() {
   const client = new Client({
     host: process.env.POSTGRES_HOST,
@@ -140,6 +167,7 @@ async function getNewClient() {
     database: process.env.POSTGRES_DB,
     password: process.env.POSTGRES_PASSWORD,
     ssl: getSSLValues(),
+    connectionTimeoutMillis: 10_000,
   });
 
   await client.connect();
@@ -150,6 +178,7 @@ const database = {
   query,
   getNewClient,
   withSharedClient,
+  withTransaction,
 };
 
 export default database;

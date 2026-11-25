@@ -55,6 +55,9 @@ async function read(placeId, sessionObject) {
   return {
     status: response.status,
     cacheControl: response.headers.get("cache-control"),
+    vercelCdnCacheControl: response.headers.get("vercel-cdn-cache-control"),
+    vercelCacheTag: response.headers.get("vercel-cache-tag"),
+    vary: response.headers.get("vary"),
     body: await response.json(),
   };
 }
@@ -66,12 +69,20 @@ describe("GET /api/v1/menus", () => {
       const sessionObject = await sessionForActivatedUser();
       const sent = await send(placeId, "Parmegiana", sessionObject);
 
-      const { status, body, cacheControl } = await read(placeId);
+      const {
+        status,
+        body,
+        cacheControl,
+        vercelCdnCacheControl,
+        vercelCacheTag,
+        vary,
+      } = await read(placeId);
 
       expect(status).toBe(200);
       expect(body).toEqual({
         id: sent.id,
         place_id: placeId,
+        place_name: "Bar com Cardápio",
         currency: "BRL",
         created_at: sent.created_at,
         sections: [
@@ -90,8 +101,14 @@ describe("GET /api/v1/menus", () => {
         can_edit: false,
         place_location: { latitude: -23.5505, longitude: -46.6333 },
       });
-      // Quem acabou de mandar espera ver o que mandou.
+      // Quem acabou de mandar espera ver o que mandou no aparelho; anônimos
+      // recebem cache na borda da Vercel por etiqueta.
       expect(cacheControl).toContain("no-store");
+      expect(vary.split(",").map((header) => header.trim())).toContain(
+        "Cookie",
+      );
+      expect(vercelCdnCacheControl).toContain("s-maxage");
+      expect(vercelCacheTag).toBe(`menu-${placeId}`);
     });
 
     // Cada envio é um cardápio novo, e o que vale é o mais recente. O mais
@@ -156,10 +173,14 @@ describe("GET /api/v1/menus", () => {
       const sessionObject = await sessionForActivatedUser();
       await send(placeId, "Bife a cavalo", sessionObject);
 
-      const { status, body } = await read(placeId, sessionObject);
+      const { status, body, vercelCdnCacheControl } = await read(
+        placeId,
+        sessionObject,
+      );
 
       expect(status).toBe(200);
       expect(body.can_edit).toBe(true);
+      expect(vercelCdnCacheControl).toBeNull();
     });
 
     test("Who did not send the menu", async () => {

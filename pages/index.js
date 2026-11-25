@@ -1,34 +1,19 @@
 import Head from "next/head";
 import Link from "next/link";
-import localFont from "next/font/local";
+import { instrumentSans } from "lib/fonts.js";
+import { CONTATO_SUPORTE, CORES } from "lib/identidade.js";
+import BotoesLojas from "components/BotoesLojas.js";
+import MarcaMenuSpoiler from "components/MarcaMenuSpoiler.js";
 
-// A home é PROVISÓRIA: uma tela só, que diz o que o Menu Spoiler é e que ele
-// ainda não está em loja nenhuma. Ela existe porque o domínio já está no ar, e
-// quem o digita merece mais que o JSON que morava aqui.
-//
-// As lojas aparecem como frase, e não como botão: selo que não leva a lugar
-// nenhum faz a pessoa concluir que o site está quebrado. Quando o aplicativo
-// for publicado, a frase vira os dois links.
+// A página inicial apresenta o Menu Spoiler, leva direto às lojas de aplicativos
+// (Google Play e App Store) e mantém à vista o contato de suporte e os links
+// legais exigidos pelas lojas.
 //
 // Nada aqui fala com a API nem com o banco — a página sai estática.
-
-// A letra é a do aplicativo, servida daqui mesmo: fonte de terceiro seria uma
-// requisição a outro site só para desenhar o título.
-const instrumentSans = localFont({
-  src: [
-    { path: "../assets/InstrumentSans-Regular.ttf", weight: "400" },
-    { path: "../assets/InstrumentSans-SemiBold.ttf", weight: "600" },
-  ],
-  display: "swap",
-});
 
 const TITULO = "O cardápio antes de você chegar.";
 const DESCRICAO =
   "Um aplicativo que mostra os pratos e os preços dos lugares perto de você. E se o cardápio ainda não estiver lá, é só fotografar.";
-const LOJAS = "Em breve para Android e iOS.";
-// O contato fica à vista na home porque ela é a URL de suporte das lojas: a
-// Apple pede que a página de suporte dê um jeito de falar com quem publica.
-const CONTATO = "contato@menuspoiler.com.br";
 
 // A folha é ilustração: três linhas de cardápio, com o preço escondido atrás
 // de uma tarja que sai sozinha — o "spoiler" do nome. Não vem do banco, e por
@@ -45,16 +30,16 @@ export default function Home() {
       <Head>
         <title>Menu Spoiler — o cardápio antes de você chegar</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <meta name="description" content={`${DESCRICAO} ${LOJAS}`} />
-        <meta name="theme-color" content="#1FB2E8" />
+        <meta name="description" content={DESCRICAO} />
+        <meta name="theme-color" content={CORES.azul} />
         <meta property="og:title" content="Menu Spoiler" />
         <meta property="og:description" content={TITULO} />
         <meta property="og:locale" content="pt_BR" />
       </Head>
-      {/* O idioma vai aqui, e não no <html>, para não criar um `_document`
-          que mudaria as outras páginas junto. */}
-      <main lang="pt-BR" className={`pagina ${instrumentSans.className}`}>
-        <p className="marca">Menu Spoiler</p>
+      <main className={`pagina ${instrumentSans.className}`}>
+        <div className="topo">
+          <MarcaMenuSpoiler sobreFundoAzul />
+        </div>
 
         <div className="conteudo">
           <h1 className="titulo">{TITULO}</h1>
@@ -72,7 +57,9 @@ export default function Home() {
               </div>
             ))}
           </div>
-          <p className="lojas">{LOJAS}</p>
+          <div className="lojas">
+            <BotoesLojas />
+          </div>
         </div>
 
         <footer className="rodape">
@@ -80,8 +67,8 @@ export default function Home() {
           <span>CNPJ 67.260.094/0001-09</span>
           <span>
             Suporte:{" "}
-            <a className="contato" href={`mailto:${CONTATO}`}>
-              {CONTATO}
+            <a className="contato" href={`mailto:${CONTATO_SUPORTE}`}>
+              {CONTATO_SUPORTE}
             </a>
           </span>
           <nav className="links" aria-label="Páginas do Menu Spoiler">
@@ -95,17 +82,15 @@ export default function Home() {
         html,
         body {
           margin: 0;
-          background: #1fb2e8;
+          background: ${CORES.azul};
         }
       `}</style>
       <style jsx>{`
-        /* As cores são as do ui::theme do aplicativo: PRIMARIA, TEXTO, CARD e
-           TEXTO_MARCADOR. */
         .pagina {
-          --azul: #1fb2e8;
-          --tinta: #0e1d26;
-          --papel: #ffffff;
-          --guia: #8a98a2;
+          --azul: ${CORES.azul};
+          --tinta: ${CORES.tinta};
+          --papel: ${CORES.papel};
+          --guia: ${CORES.guia};
           --lado: clamp(20px, 6vw, 72px);
 
           box-sizing: border-box;
@@ -124,11 +109,10 @@ export default function Home() {
           -webkit-font-smoothing: antialiased;
         }
 
-        .marca {
-          margin: 0;
-          font-size: 1.375rem;
-          font-weight: 600;
-          letter-spacing: -0.02em;
+        .topo {
+          display: flex;
+          align-items: center;
+          justify-content: flex-start;
         }
 
         .conteudo {
@@ -146,16 +130,11 @@ export default function Home() {
           text-wrap: balance;
         }
 
-        .texto,
-        .lojas {
+        .texto {
           margin: 0;
           max-width: 30em;
           font-size: clamp(1.0625rem, 0.95rem + 0.45vw, 1.3125rem);
           line-height: 1.45;
-        }
-
-        .lojas {
-          font-weight: 600;
         }
 
         /* A folha mede em em: a largura e o respiro acompanham a letra dela,

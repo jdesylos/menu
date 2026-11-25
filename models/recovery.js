@@ -1,6 +1,7 @@
 import database from "infra/database.js";
 import email from "infra/email.js";
 import webserver from "infra/webserver.js";
+import authorization from "models/authorization.js";
 import password from "models/password.js";
 import user from "models/user.js";
 import { NotFoundError, ValidationError } from "infra/errors.js";
@@ -54,6 +55,37 @@ async function request(providedEmail) {
   return recoveryToken;
 }
 
+// Pedido de recuperação vindo do painel administrativo web: só gera e envia
+// o link web para contas com a permissão `admin`, mantendo resposta uniforme
+// para não expor quais endereços têm acesso administrativo.
+async function requestAdmin(providedEmail) {
+  if (typeof providedEmail !== "string" || providedEmail.trim() === "") {
+    throw new ValidationError({
+      message: "O email não foi informado.",
+      action: "Informe o email da sua conta e tente de novo.",
+    });
+  }
+
+  let storedUser;
+  try {
+    storedUser = await user.findOneByEmail(providedEmail.trim());
+  } catch (error) {
+    if (error instanceof NotFoundError) {
+      return null;
+    }
+    throw error;
+  }
+
+  if (storedUser.deleted_at || !authorization.can(storedUser, "admin")) {
+    return null;
+  }
+
+  const recoveryToken = await create(storedUser.id);
+  await sendEmailToUser(storedUser, recoveryToken, { isAdminPanel: true });
+
+  return recoveryToken;
+}
+
 async function create(userId) {
   const expiresAt = new Date(Date.now() + EXPIRATION_IN_MILLISECONDS);
 
@@ -103,16 +135,29 @@ async function findOneValidById(tokenId) {
 // O link é o do domínio do aplicativo, e o caminho é o que o filtro dele
 // aceita — ver `pages/senha/recuperar/[token].js`. Sem o nome de usuário no
 // texto, pelo motivo de `activation.sendEmailToUser`.
-async function sendEmailToUser(user, recoveryToken) {
+async function sendEmailToUser(
+  user,
+  recoveryToken,
+  { isAdminPanel = false } = {},
+) {
+  const link = isAdminPanel
+    ? `${webserver.origin}/admin/recuperar-senha/${recoveryToken.id}`
+    : `${webserver.origin}/senha/recuperar/${recoveryToken.id}`;
+  const instrucao = isAdminPanel
+    ? "Para criar uma senha nova e acessar o painel administrativo, abra este link no navegador:"
+    : "Para criar uma senha nova, abra este link no celular em que o aplicativo está instalado:";
+
   await email.send({
     from: "Menu Spoiler <contato@menuspoiler.com.br>",
     to: user.email,
-    subject: "Crie uma senha nova no Menu Spoiler",
+    subject: isAdminPanel
+      ? "Recupere seu acesso ao painel — Menu Spoiler"
+      : "Crie uma senha nova no Menu Spoiler",
     text: `Olá! Recebemos um pedido para trocar a senha da sua conta no Menu Spoiler.
 
-Para criar uma senha nova, abra este link no celular em que o aplicativo está instalado:
+${instrucao}
 
-${webserver.origin}/senha/recuperar/${recoveryToken.id}
+${link}
 
 O link vale por 15 minutos e só pode ser usado uma vez.
 
@@ -215,6 +260,7 @@ async function reset(tokenId, newPassword) {
 
 const recovery = {
   request,
+  requestAdmin,
   create,
   findOneValidById,
   sendEmailToUser,

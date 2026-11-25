@@ -8,7 +8,7 @@ import cdn from "infra/cdn.js";
 // borda, e ela não faz nada.
 jest.mock("infra/database.js", () => ({
   __esModule: true,
-  default: { getNewClient: jest.fn() },
+  default: { withTransaction: jest.fn() },
 }));
 jest.mock("infra/cdn.js", () => ({
   __esModule: true,
@@ -41,15 +41,7 @@ const TILES_DA_RAUL_SADDI_66 = [
 // uma hora.
 function conexaoQueResponde(respostas) {
   const client = {
-    end: jest.fn(),
-    query: jest.fn(async (query) => {
-      if (query === "BEGIN" || query === "ROLLBACK") {
-        return {};
-      }
-      if (query === "COMMIT") {
-        expect(cdn.forget).not.toHaveBeenCalled();
-        return {};
-      }
+    query: jest.fn(async () => {
       const resposta = respostas.shift();
       if (resposta instanceof Error) {
         throw resposta;
@@ -57,7 +49,12 @@ function conexaoQueResponde(respostas) {
       return resposta;
     }),
   };
-  database.getNewClient.mockResolvedValue(client);
+  database.withTransaction.mockImplementation(async (callback) => {
+    const resultado = await callback(client);
+    // Até o COMMIT da transação, a borda não pode ter sido tocada.
+    expect(cdn.forget).not.toHaveBeenCalled();
+    return resultado;
+  });
   return client;
 }
 
@@ -84,7 +81,7 @@ describe("models/placeSuggestion.js", () => {
         changes: { name: "Queijo e Carne Burger", ...RAUL_SADDI_66 },
       });
       const revisada = { ...pedido, status: "accepted" };
-      const client = conexaoQueResponde([
+      conexaoQueResponde([
         linha([pedido]),
         // O lugar que nasce.
         linha([
@@ -100,15 +97,16 @@ describe("models/placeSuggestion.js", () => {
       );
 
       expect(resultado).toEqual(revisada);
-      expect(client.query).toHaveBeenCalledWith("COMMIT");
+      expect(database.withTransaction).toHaveBeenCalledTimes(1);
       expect(cdn.forget).toHaveBeenCalledTimes(1);
       expect(cdn.forget).toHaveBeenCalledWith(TILES_DA_RAUL_SADDI_66);
     });
 
     test("accepting a close", async () => {
+      const placeId = "87fa1a04-f1c0-4842-9ece-6eb81836651c";
       const pedido = sugestao({
         kind: "close",
-        place_id: "87fa1a04-f1c0-4842-9ece-6eb81836651c",
+        place_id: placeId,
       });
       conexaoQueResponde([
         linha([pedido]),
@@ -120,7 +118,11 @@ describe("models/placeSuggestion.js", () => {
       await placeSuggestion.review(QUEM_REVISA, pedido.id, "accepted");
 
       expect(cdn.forget).toHaveBeenCalledTimes(1);
-      expect(cdn.forget).toHaveBeenCalledWith(TILES_DA_RAUL_SADDI_66);
+      expect(cdn.forget).toHaveBeenCalledWith([
+        ...TILES_DA_RAUL_SADDI_66,
+        `place-share-${placeId}`,
+        `menu-${placeId}`,
+      ]);
     });
 
     // O lugar sai de um tile e entra no outro, e os dois mudam. Em z14 e z15
@@ -147,6 +149,7 @@ describe("models/placeSuggestion.js", () => {
         "places-16-24264-37184",
         "places-17-48528-74369",
         "places-18-97056-148739",
+        `place-share-${pedido.place_id}`,
       ]);
     });
 
@@ -172,17 +175,12 @@ describe("models/placeSuggestion.js", () => {
         kind: "create",
         changes: { name: "Queijo e Carne Burger", ...RAUL_SADDI_66 },
       });
-      const client = conexaoQueResponde([
-        linha([pedido]),
-        new Error("insert failed"),
-      ]);
+      conexaoQueResponde([linha([pedido]), new Error("insert failed")]);
 
       await expect(
         placeSuggestion.review(QUEM_REVISA, pedido.id, "accepted"),
       ).rejects.toThrow("insert failed");
 
-      expect(client.query).toHaveBeenCalledWith("ROLLBACK");
-      expect(client.query).not.toHaveBeenCalledWith("COMMIT");
       expect(cdn.forget).not.toHaveBeenCalled();
     });
   });

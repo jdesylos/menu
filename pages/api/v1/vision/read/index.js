@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { createRouter } from "next-connect";
 import controller from "infra/controller.js";
 import auditLog from "models/auditLog.js";
@@ -57,7 +58,7 @@ async function postHandler(request, response) {
           path: error.path,
         }),
       );
-      await record(request, userTryingToRead);
+      waitUntil(record(request, userTryingToRead));
       return response.status(error.statusCode).json(error);
     }
     throw error;
@@ -75,7 +76,7 @@ async function postHandler(request, response) {
       path: reading.path,
     }),
   );
-  await record(request, userTryingToRead);
+  waitUntil(record(request, userTryingToRead));
 
   response.setHeader("Cache-Control", "no-store");
   return response.status(200).json({
@@ -86,11 +87,18 @@ async function postHandler(request, response) {
 
 // Toda leitura que chegou ao provedor — a que deu certo e a que não deu.
 async function record(request, user) {
-  await auditLog.record({
-    action: "vision.read",
-    actorUserId: user.id,
-    ip: controller.getClientIp(request),
-  });
+  try {
+    await auditLog.record({
+      action: "vision.read",
+      actorUserId: user.id,
+      ip: controller.getClientIp(request),
+    });
+  } catch (error) {
+    console.error({
+      name: "VisionAuditRecordError",
+      underlyingErrorName: error?.name,
+    });
+  }
 }
 
 // O corpo, com o teto da foto: passado dele, para de ler e recusa.

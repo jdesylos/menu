@@ -62,10 +62,19 @@ async function getHandler(request, response) {
   // sessão é sempre `false`, e ler continua público.
   found.can_edit = menu.canEditText(userTryingToGet, found);
 
-  // Sem cache de borda: quem acabou de mandar um cardápio abre o lugar e
-  // espera ver o que mandou, e não o de um minuto atrás — e a resposta muda
-  // com quem pergunta.
+  // Sem cache no aparelho/navegador: quem acabou de mandar um cardápio abre o
+  // lugar e espera ver o que mandou. Para leituras anônimas (sem cookie de
+  // sessão), `can_edit` é sempre `false`, permitindo cache na borda da Vercel
+  // com purga por etiqueta em `menu.create`/`menu.replace`.
   response.setHeader("Cache-Control", NO_STORE);
+  response.setHeader("Vary", "Cookie");
+  if (!request.cookies?.session_id) {
+    response.setHeader(
+      "Vercel-CDN-Cache-Control",
+      "public, s-maxage=3600, stale-while-revalidate=86400",
+    );
+    response.setHeader("Vercel-Cache-Tag", menu.cacheTag(found.place_id));
+  }
   return response
     .status(200)
     .json(authorization.filterOutput(userTryingToGet, "read:menu", found));

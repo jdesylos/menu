@@ -201,4 +201,55 @@ describe("infra/database.js", () => {
       expect(Client.created[0].ended).toBe(true);
     });
   });
+
+  describe(".withTransaction()", () => {
+    test("outside a shared client, commits and closes its own connection", async () => {
+      const returned = await database.withTransaction(async (client) => {
+        await client.query("UPDATE items SET qty = 1");
+        return "ok";
+      });
+
+      expect(returned).toBe("ok");
+      expect(Client.created).toHaveLength(1);
+      expect(Client.created[0].queries).toEqual([
+        "BEGIN",
+        "UPDATE items SET qty = 1",
+        "COMMIT",
+      ]);
+      expect(Client.created[0].ended).toBe(true);
+    });
+
+    test("outside a shared client, rolls back and closes on error", async () => {
+      await expect(
+        database.withTransaction(async () => {
+          throw new Error("falhou na transação");
+        }),
+      ).rejects.toThrow("falhou na transação");
+
+      expect(Client.created).toHaveLength(1);
+      expect(Client.created[0].queries).toEqual(["BEGIN", "ROLLBACK"]);
+      expect(Client.created[0].ended).toBe(true);
+    });
+
+    test("inside a shared client, reuses the connection without closing early", async () => {
+      await database.withSharedClient(async () => {
+        await database.query("SELECT 1");
+        await database.withTransaction(async (client) => {
+          await client.query("INSERT INTO logs VALUES (1)");
+        });
+        expect(Client.created[0].ended).toBe(false);
+        await database.query("SELECT 2");
+      });
+
+      expect(Client.created).toHaveLength(1);
+      expect(Client.created[0].queries).toEqual([
+        "SELECT 1",
+        "BEGIN",
+        "INSERT INTO logs VALUES (1)",
+        "COMMIT",
+        "SELECT 2",
+      ]);
+      expect(Client.created[0].ended).toBe(true);
+    });
+  });
 });

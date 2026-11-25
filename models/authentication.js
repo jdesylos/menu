@@ -3,6 +3,16 @@ import password from "models/password.js";
 import { NotFoundError, UnauthorizedError } from "infra/errors.js";
 
 async function getUser(providedEmail, providedPassword) {
+  if (
+    typeof providedEmail !== "string" ||
+    typeof providedPassword !== "string"
+  ) {
+    throw new UnauthorizedError({
+      message: "Dados de autenticação não conferem.",
+      action: "Verifique se os dados enviados estão corretos.",
+    });
+  }
+
   try {
     const storedUser = await findUserByEmail(providedEmail);
     await validatePassword(providedPassword, storedUser.password);

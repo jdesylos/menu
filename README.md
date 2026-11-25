@@ -1,18 +1,18 @@
 # Menu Spoiler
 
-API REST do **Menu Spoiler**.
+API REST, site institucional, painel administrativo web e páginas auxiliares em
+links de e-mail e compartilhamento do **Menu Spoiler**.
 
-Este repositório **não tem interface**: ele existe apenas para expor o banco de dados
-através de uma **API REST** — contas, autenticação por sessão e ativação por e-mail.
-Qualquer front-end (site ou aplicativo) consome estes endpoints; nada de tela vive aqui.
-
-As exceções são duas páginas: a home (`pages/index.js`), provisória, que diz a quem digita
-o domínio o que é o aplicativo, e a do link de ativação — ver
-[Ativação no aplicativo](#ativação-no-aplicativo).
+O repositório centraliza a autenticação por sessão, o banco de dados, o painel em
+`/admin` para gestão operacional e a página inicial institucional com os links das
+lojas. Não há versão pública web dos cardápios: links compartilhados em
+`/cardapio/[place_id]` abrem o aplicativo instalado (Universal/App Links) ou
+direcionam à Google Play Store e à Apple App Store.
 
 ## Stack
 
-- [Next.js](https://nextjs.org/) API Routes (`pages/api`), mais a home e a página do link de ativação
+- [Next.js](https://nextjs.org/) (API Routes em `pages/api` e páginas em `pages/`)
+- [MapLibre GL](https://maplibre.org/) no mapa do painel administrativo
 - PostgreSQL — [Neon](https://neon.tech/) em produção, Docker em desenvolvimento
 - Migrations com [node-pg-migrate](https://github.com/salsita/node-pg-migrate)
 - Deploy na [Vercel](https://vercel.com/)
@@ -57,56 +57,76 @@ terminar.
 
 ## Scripts
 
-| Script                      | O que faz                                           |
-| --------------------------- | --------------------------------------------------- |
-| `npm run dev`               | Sobe os serviços, roda as migrations e inicia a API |
-| `npm test`                  | Roda a suíte completa de testes                     |
-| `npm run test:watch`        | Roda os testes em modo watch                        |
-| `npm run services:up`       | Sobe apenas os containers                           |
-| `npm run services:stop`     | Para os containers                                  |
-| `npm run services:down`     | Remove os containers                                |
-| `npm run migrations:create` | Cria uma nova migration                             |
-| `npm run migrations:up:dev` | Aplica as migrations no banco local                 |
-| `npm run migrations:up`     | Aplica as migrations lendo `POSTGRES_*` do ambiente |
-| `npm run lint:prettier:fix` | Formata o código                                    |
-| `npm run places:import`     | Baixa e carrega os estabelecimentos do Overture     |
-| `npm run commit`            | Commit guiado pelo Commitizen                       |
+| Script                        | O que faz                                                           |
+| ----------------------------- | ------------------------------------------------------------------- |
+| `npm run dev`                 | Sobe os serviços, roda as migrations e inicia a API                 |
+| `npm test`                    | Roda a suíte completa de testes                                     |
+| `npm run test:watch`          | Roda os testes em modo watch                                        |
+| `npm run services:up`         | Sobe apenas os containers                                           |
+| `npm run services:stop`       | Para os containers                                                  |
+| `npm run services:down`       | Remove os containers                                                |
+| `npm run migrations:create`   | Cria uma nova migration                                             |
+| `npm run migrations:up:dev`   | Aplica as migrations no banco local                                 |
+| `npm run migrations:up`       | Aplica as migrations lendo `POSTGRES_*` do ambiente                 |
+| `npm run places:import`       | Baixa e carrega os estabelecimentos do Overture                     |
+| `npm run places:manual`       | Importa estabelecimentos manuais de `infra/data/manual-places.json` |
+| `npm run admin:promote`       | Concede todas as permissões admin a um usuário existente            |
+| `npm run admin:seed:dev`      | Cria ou atualiza a conta admin de desenvolvimento local             |
+| `npm run lint:prettier:check` | Verifica formatação com Prettier                                    |
+| `npm run lint:prettier:fix`   | Formata o código                                                    |
+| `npm run lint:eslint:check`   | Executa ESLint com zero avisos tolerados                            |
+| `npm run commit`              | Commit guiado pelo Commitizen                                       |
 
-## API
+## API e rotas web
 
-| Endpoint                               | Descrição                          |
-| -------------------------------------- | ---------------------------------- |
-| `GET /`                                | Home provisória do aplicativo      |
-| `GET /status`                          | Atalho para o endpoint de status   |
-| `GET /api/v1/status`                   | Status do sistema e do banco       |
-| `POST /api/v1/users`                   | Cria uma conta                     |
-| `GET /api/v1/users/[username]`         | Dados de outro usuário (sessão)    |
-| `PATCH /api/v1/users/[username]`       | Troca o nome de um usuário         |
-| `GET /api/v1/user`                     | Usuário da sessão atual            |
-| `DELETE /api/v1/user`                  | Apaga a conta da sessão atual      |
-| `PATCH /api/v1/user/password`          | Troca a senha da sessão atual      |
-| `PATCH /api/v1/user/username`          | Troca o nome da sessão atual       |
-| `POST /api/v1/sessions`                | Login                              |
-| `DELETE /api/v1/sessions`              | Logout                             |
-| `PATCH /api/v1/activations/[token_id]` | Ativa a conta pelo token do e-mail |
-| `GET /cadastro/ativar/[token]`         | Página do link, que só encaminha   |
-| `POST /api/v1/recoveries`              | Pede o link de "esqueci a senha"   |
-| `PATCH /api/v1/recoveries/[token_id]`  | Grava a senha nova de quem abriu   |
-| `GET /senha/recuperar/[token]`         | Página do link, que só encaminha   |
-| `GET /.well-known/assetlinks.json`     | App Links do aplicativo Android    |
-| `GET /api/v1/migrations`               | Lista as migrations pendentes      |
-| `POST /api/v1/migrations`              | Aplica as migrations pendentes     |
-| `GET /api/v1/tiles/[z]/[x]/[y]`        | Tile vetorial do mapa              |
-| `GET /api/v1/places/[z]/[x]/[y]`       | Lugares de comer dentro de um tile |
-| `GET /api/v1/places?q=`                | Busca de lugares por nome          |
-| `POST /api/v1/suggestions`             | Sugere um lugar ou uma mudança     |
-| `GET /api/v1/suggestions`              | As próprias sugestões, ou a fila   |
-| `PATCH /api/v1/suggestions/[id]`       | Aceita ou recusa uma sugestão      |
-| `POST /api/v1/menus`                   | Manda o cardápio de um lugar       |
-| `GET /api/v1/menus?place_id=`          | O cardápio que vale para um lugar  |
-| `GET /api/v1/menus/places`             | Os lugares que têm cardápio        |
-| `GET /api/v1/user/menus`               | Os cardápios que a conta mandou    |
-| `POST /api/v1/vision/read`             | Lê a foto de um cardápio           |
+| Rota / Endpoint                                | Descrição                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `GET /`                                        | Site institucional com logotipo e botões das lojas                        |
+| `GET /cardapio/[place_id]`                     | Fallback web do link compartilhado (apenas nome e atalhos às lojas)       |
+| `GET /conta/confirmar-email/[token]`           | Confirmação de troca de e-mail com opção de enviar link de senha          |
+| `GET /cadastro/ativar/[token]`                 | Página do link de ativação, que só encaminha ao aplicativo                |
+| `GET /senha/recuperar/[token]`                 | Página do link de recuperação, que só encaminha ao aplicativo             |
+| `GET /privacidade`                             | Política de privacidade                                                   |
+| `GET /admin`                                   | Central administrativa unificada (locais, sugestões, suporte, contas)     |
+| `GET /admin/login` e `/admin/recuperar-senha`  | Autenticação, recuperação de senha e entrada administrativa               |
+| `GET /admin/estabelecimentos/[id]`             | Edição detalhada de estabelecimento, mapa e cardápio                      |
+| `GET /admin/usuarios/[id]`                     | Ficha detalhada de usuário, troca de dados, cargo e auditoria             |
+| `GET /status`                                  | Atalho para o endpoint de status                                          |
+| `GET /api/v1/status`                           | Status do sistema e do banco                                              |
+| `POST /api/v1/users`                           | Cria uma conta                                                            |
+| `GET /api/v1/users/[username]`                 | Dados de outro usuário (sessão)                                           |
+| `PATCH /api/v1/users/[username]`               | Troca o nome de um usuário                                                |
+| `GET /api/v1/user`                             | Usuário da sessão atual                                                   |
+| `DELETE /api/v1/user`                          | Apaga a conta da sessão atual e anonimiza solicitações de suporte         |
+| `PATCH /api/v1/user/password`                  | Troca a senha da sessão atual                                             |
+| `PATCH /api/v1/user/username`                  | Troca o nome da sessão atual                                              |
+| `POST /api/v1/sessions`                        | Login no aplicativo                                                       |
+| `DELETE /api/v1/sessions`                      | Logout no aplicativo                                                      |
+| `PATCH /api/v1/activations/[token_id]`         | Ativa a conta pelo token do e-mail                                        |
+| `POST /api/v1/recoveries`                      | Pede o link de "esqueci a senha"                                          |
+| `PATCH /api/v1/recoveries/[token_id]`          | Grava a senha nova de quem abriu                                          |
+| `GET /api/v1/recoveries/without-email`         | Estrutura pública do questionário de recuperação sem e-mail               |
+| `POST /api/v1/recoveries/without-email`        | Avalia recuperação sem acesso ao e-mail antigo ou encaminha ao suporte    |
+| `GET / PATCH /api/v1/email-changes/[token_id]` | Valida ou confirma troca de e-mail (e senha opcional)                     |
+| `GET /api/v1/support/info`                     | Orientações de ajuda e canal oficial de contato                           |
+| `POST / GET /api/v1/support/requests`          | Envia pedido de local/ajuda (público) ou lista pedidos da sessão          |
+| `GET /.well-known/assetlinks.json`             | App Links do aplicativo Android                                           |
+| `GET /.well-known/apple-app-site-association`  | Universal Links do aplicativo iOS                                         |
+| `GET /api/v1/migrations`                       | Lista as migrations pendentes                                             |
+| `POST /api/v1/migrations`                      | Aplica as migrations pendentes                                            |
+| `GET /api/v1/tiles/[z]/[x]/[y]`                | Tile vetorial do mapa                                                     |
+| `GET /api/v1/places/[z]/[x]/[y]`               | Lugares de comer dentro de um tile                                        |
+| `GET /api/v1/places?q=`                        | Busca de lugares por nome                                                 |
+| `POST /api/v1/suggestions`                     | Sugere um lugar ou uma mudança                                            |
+| `GET /api/v1/suggestions`                      | As próprias sugestões, ou a fila                                          |
+| `PATCH /api/v1/suggestions/[id]`               | Aceita ou recusa uma sugestão                                             |
+| `POST /api/v1/menus`                           | Manda o cardápio de um lugar                                              |
+| `GET /api/v1/menus?place_id=`                  | O cardápio que vale para um lugar                                         |
+| `GET /api/v1/menus/places`                     | Os lugares que têm cardápio                                               |
+| `GET /api/v1/user/menus`                       | Os cardápios que a conta mandou                                           |
+| `POST /api/v1/vision/read`                     | Lê a foto de um cardápio                                                  |
+| `/api/v1/admin/*`                              | Sessão, locais, cardápios, usuários e solicitações do painel `/admin`     |
+| `GET /api/v1/cron/cleanup`                     | Limpeza diária de tokens, sessões e rate limits expirados (`CRON_SECRET`) |
 
 A sessão é entregue em um cookie `session_id` (`httpOnly`), e o token também vem no corpo
 do `POST /api/v1/sessions` — o aplicativo nativo lê dali e manda `Cookie: session_id=<token>`
@@ -157,8 +177,10 @@ para levantar a lista de contas. A troca fica em `audit_logs` como
 
 `PATCH /api/v1/users/[username]` troca **só o nome**, pelas mesmas regras: o da própria
 conta, ou o de outra para quem tem `update:user:others`. Qualquer outro campo no corpo
-responde `400`: a senha se troca por `PATCH /api/v1/user/password`, que pede a atual, e o
-email não se troca por rota nenhuma. Essa rota não tem o limite de tentativas.
+responde `400`: a senha se troca por `PATCH /api/v1/user/password`, e alterações de e-mail
+seguem apenas os fluxos dedicados de administração (`/api/v1/admin/users/[id]`),
+confirmação por token (`/api/v1/email-changes/[token_id]`) ou recuperação sem e-mail.
+Essa rota não tem o limite de tentativas.
 
 ### Apagar a conta
 
@@ -186,12 +208,13 @@ declara o aplicativo:
   digital SHA-256 do certificado que assina o APK. Hoje é a chave de desenvolvimento;
   a da loja entra na mesma lista quando o aplicativo for publicado (no Google Play, a
   do _App Signing_, que o Play Console mostra).
-- O arquivo equivalente do iOS (`apple-app-site-association`) ainda não existe: ele leva o
-  Team ID da conta Apple paga.
+- `public/.well-known/apple-app-site-association` — Universal Links do iOS para
+  `UFT3B28989.com.menuspoiler.app`, cobrindo `/cadastro/ativar/*`, `/senha/recuperar/*` e
+  `/cardapio/*`, servido com `Content-Type: application/json` pelo `next.config.js`.
 
-O Android só confere o arquivo se ele vier do próprio domínio, em `https` e **sem
-redirecionamento** — o domínio principal na Vercel tem de ser `menuspoiler.com.br`, e não
-o `www`.
+O Android só confere os arquivos de associação se vierem do próprio domínio, em `https` e
+**sem redirecionamento** — o domínio principal na Vercel tem de ser `menuspoiler.com.br`,
+e não o `www`. As páginas com token na URL enviam `Referrer-Policy: no-referrer`.
 
 A página `pages/cadastro/ativar/[token].js` é para quem abre o link em outro lugar — no
 computador, ou num celular sem o aplicativo. Ela explica onde abrir e, no Android, oferece
@@ -438,6 +461,74 @@ Até outubro de 2026 o aplicativo chamava o provedor direto, com a chave que
 aplicativo. A rota saiu quando o aplicativo passou a ler por aqui, e com ela a variável
 `VISION_TOKEN`.
 
+### Compartilhamento e site institucional
+
+A página inicial (`pages/index.js`) traz a identidade visual de `lib/identidade.js`, o
+logotipo oficial e os botões para instalação na App Store e no Google Play.
+
+Os links compartilhados de cardápio apontam para `https://menuspoiler.com.br/cardapio/<place_id>`.
+Quando o aplicativo está instalado, iOS e Android interceptam a rota pelo domínio associado;
+no navegador, `pages/cardapio/[place_id].js` exibe apenas o nome do estabelecimento (sem
+pratos nem preços) e os atalhos para abrir ou baixar o aplicativo.
+
+### Suporte e ajuda
+
+As solicitações de estabelecimentos ausentes e os pedidos de ajuda entram em
+`support_requests` nas categorias `missing_place`, `account_help` e `general_help`:
+
+- `GET /api/v1/support/info` devolve orientações de uso e o canal de contato configurado
+  por `SUPPORT_CONTACT_EMAIL` / `SUPPORT_CONTACT_URL` (padrão `contato@menuspoiler.com.br`).
+- `POST /api/v1/support/requests` aceita envios anônimos ou autenticados sob limite de
+  **10 tentativas por IP a cada 15 minutos**, com coordenadas opcionais de referência.
+  Solicitações não publicam estabelecimentos automaticamente no mapa.
+- `GET /api/v1/support/requests` lista os chamados da sessão autenticada. Ao excluir a
+  própria conta em `DELETE /api/v1/user`, `contact_name`, `contact_email` e
+  `account_identifier` desses registros são anonimizados.
+
+### Recuperação sem acesso ao e-mail antigo
+
+Quem perdeu o acesso ao e-mail da conta consulta o questionário público em
+`GET /api/v1/recoveries/without-email` e envia as respostas para
+`POST /api/v1/recoveries/without-email` sob duas travas de rate limit (**5 por IP a cada
+15 minutos** e **3 por identificador a cada 24 horas**). Campos contendo senha são
+recusados e a resposta é uniforme (`202`) para evitar enumeração de contas.
+
+- A aprovação automática só dispara confirmação no novo e-mail (`emailChange.requestChange`)
+  para contas comuns e ativadas que tenham histórico privado (`menus` ou `place_suggestions`)
+  e comprovem e-mail anterior, estabelecimento privado e sinal de reforço.
+- Contas sem histórico, administrativas, inativas, respostas inconclusivas ou conflitos de
+  e-mail encaminham um chamado deduplicado em `support_requests` (`account_help`) com
+  resumo sanitizado, sem armazenar senhas nem respostas esperadas do banco.
+- A confirmação em `/conta/confirmar-email/[token]` chama `PATCH /api/v1/email-changes/[token_id]`
+  e oferece o envio do link de redefinição de senha (`POST /api/v1/recoveries` ou opção
+  `send_password_recovery: true` no próprio `PATCH`).
+
+### Painel administrativo (`/admin`)
+
+A interface administrativa atende em `/admin` e exige conta ativada com as features de
+operação do painel (`ALL_ADMIN_FEATURES` em `models/features.js`: `admin`, `manage:place`,
+`manage:menu`, `manage:support`, `read:user:admin`, `update:user:others`, `erase:user:others`
+e `manage:admins`). Contas comuns recebem bloqueio nas APIs e no login do painel.
+
+- **Primeiro acesso em produção:** cadastre a conta pelo fluxo normal e promova com as
+  variáveis `POSTGRES_*` de produção apontadas:
+
+  ```bash
+  npm run admin:promote -- seu-email@dominio.com
+  ```
+
+- **Desenvolvimento local:** `npm run admin:seed:dev` cria ou restaura a credencial local
+  `admin@menuspoiler.local` / `devadminpassword` (bloqueada quando `NODE_ENV=production`).
+- **Estabelecimentos e cardápios:** busque por nome, endereço ou UUID, filtre ocultos ou
+  locais com cardápio e abra `/admin/estabelecimentos/[id]` para editar dados, coordenadas no
+  mapa vetorial e itens do cardápio sem exigência de proximidade por GPS. Exclusões padrão
+  ocultam o local (`hidden_reason` e `duplicate_of` opcional) preservando overrides para
+  cargas futuras; remoção física só ocorre em locais criados no admin sem vínculos.
+- **Sugestões, suporte e contas:** aprove ou recuse sugestões de locais, atenda chamados
+  em `Solicitações e ajuda` (com pré-preenchimento direto ao cadastrar um local faltante e
+  resumo da triagem de recuperação com atalho à conta) e gerencie usuários, cargos admin,
+  trocas de nome/e-mail e auditoria em `/admin/usuarios/[id]`.
+
 ## Deploy
 
 O banco fica na **Neon** e a API na **Vercel**. Em ambos, entre com **"Continue with
@@ -458,23 +549,28 @@ enxerga o repositório na hora de importar e cada push já vira um deploy.
 
 ### Variáveis de ambiente
 
-| Variável              | De onde vem                                   |
-| --------------------- | --------------------------------------------- |
-| `POSTGRES_HOST`       | Neon                                          |
-| `POSTGRES_PORT`       | Neon (`5432`)                                 |
-| `POSTGRES_USER`       | Neon                                          |
-| `POSTGRES_PASSWORD`   | Neon                                          |
-| `POSTGRES_DB`         | Neon                                          |
-| `POSTGRES_CA`         | Opcional — certificado, se quiser fixar o SSL |
-| `EMAIL_SMTP_HOST`     | Provedor de e-mail transacional               |
-| `EMAIL_SMTP_PORT`     | Provedor de e-mail transacional               |
-| `EMAIL_SMTP_USER`     | Provedor de e-mail transacional               |
-| `EMAIL_SMTP_PASSWORD` | Provedor de e-mail transacional               |
-| `PROTOMAPS_API_KEY`   | Protomaps — chave da API de tiles do mapa     |
-| `GEMINI_API_KEY`      | Provedor de visão — só o servidor a usa       |
+| Variável                | De onde vem                                                  |
+| ----------------------- | ------------------------------------------------------------ |
+| `POSTGRES_HOST`         | Neon                                                         |
+| `POSTGRES_PORT`         | Neon (`5432`)                                                |
+| `POSTGRES_USER`         | Neon                                                         |
+| `POSTGRES_PASSWORD`     | Neon                                                         |
+| `POSTGRES_DB`           | Neon                                                         |
+| `POSTGRES_CA`           | Opcional — certificado, se quiser fixar o SSL                |
+| `EMAIL_SMTP_HOST`       | Provedor de e-mail transacional                              |
+| `EMAIL_SMTP_PORT`       | Provedor de e-mail transacional                              |
+| `EMAIL_SMTP_USER`       | Provedor de e-mail transacional                              |
+| `EMAIL_SMTP_PASSWORD`   | Provedor de e-mail transacional                              |
+| `PROTOMAPS_API_KEY`     | Protomaps — tiles do app e mapa vetorial do `/admin`         |
+| `GEMINI_API_KEY`        | Provedor de visão — só o servidor a usa                      |
+| `CRON_SECRET`           | Segredo para autenticar o cron diário `/api/v1/cron/cleanup` |
+| `SUPPORT_CONTACT_EMAIL` | Opcional — sobrescreve `contato@menuspoiler.com.br`          |
+| `SUPPORT_CONTACT_URL`   | Opcional — link secundário exibido em `/api/v1/support/info` |
 
 Em produção a conexão com o Postgres usa SSL automaticamente; `POSTGRES_CA` só é
-necessário se você quiser validar contra um certificado específico.
+necessário se você quiser validar contra um certificado específico. Sem `PROTOMAPS_API_KEY`
+no ambiente local, o mapa de `/admin` usa tiles vetoriais abertos do OpenFreeMap com as
+mesmas camadas do aplicativo.
 
 ### 3. Migrations em produção
 
@@ -566,6 +662,13 @@ recarregar a cada poucos meses basta.
 **Nada disso roda sozinho**: não há agendamento, pelo mesmo motivo que as migrations
 também são disparadas à mão — automatizar exigiria dar credencial de escrita em massa no
 banco de produção a um runner de CI, para um job que roda poucas vezes por ano.
+
+### 5. Limpeza diária na Vercel
+
+O `vercel.json` agenda `GET /api/v1/cron/cleanup` diariamente às `04:00` UTC para apagar
+registros expirados de `rate_limits` (> 24 h) e sessões ou tokens vencidos (> 7 dias).
+Configure `CRON_SECRET` na Vercel para autenticar a chamada via cabeçalho
+`Authorization: Bearer <CRON_SECRET>`.
 
 ## Commits
 

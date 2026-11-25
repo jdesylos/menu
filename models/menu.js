@@ -89,11 +89,9 @@ async function create(user, input) {
   // O tile do lugar diz se ele tem cardápio (`has_menu`), e a borda o guarda
   // por uma hora: sem isto, o marcador de quem acabou de ganhar um cardápio
   // seguia sem cor no mapa — com o lugar já na lista de cardápios, que não
-  // passa pela borda.
-  //
-  // Só no primeiro cardápio do lugar, que é o único que muda o `has_menu`: a
-  // troca não muda a cor do marcador.
-  cdn.forget(place.cacheTagsOf(values.place));
+  // passa pela borda. Também apaga eventual cache de leitura pública do
+  // cardápio deste lugar.
+  cdn.forget([...place.cacheTagsOf(values.place), cacheTag(values.place.id)]);
 
   return await findOneById(id);
 }
@@ -131,6 +129,57 @@ async function replace(user, values) {
       action: "Abra o cardápio de novo e refaça as mudanças.",
     });
   }
+
+  cdn.forget([cacheTag(values.place.id)]);
+
+  return await findOneById(id);
+}
+
+// Salvamento administrativo: permite criar ou substituir o cardápio de um lugar
+// (inclusive se ainda estiver oculto) sem exigir proximidade do GPS nem autoria
+// original, preservando versionamento atômico via `replaces_menu_id`.
+async function saveByAdmin(adminUser, input) {
+  const values = await parseInput(input, {
+    allowHiddenPlace: true,
+    allowPosition: false,
+  });
+
+  let id;
+  if (values.replaces) {
+    const base = await findOneById(values.replaces);
+
+    if (!base || base.place_id !== values.place.id) {
+      throw new NotFoundError({
+        message: "O cardápio a substituir não é deste lugar.",
+        action: "Recarregue o cardápio do lugar e tente de novo.",
+      });
+    }
+
+    rejectItemsNotIn(base, values.items);
+
+    id = await insert(adminUser, values, {
+      replaces: base.id,
+      distance: null,
+    });
+
+    if (id === null) {
+      throw new ConflictError({
+        message: "O cardápio deste lugar mudou enquanto você o editava.",
+        action: "Recarregue o cardápio e refaça as alterações.",
+      });
+    }
+  } else {
+    id = await insert(adminUser, values, { replaces: null, distance: null });
+
+    if (id === null) {
+      throw new ConflictError({
+        message: "Este lugar já recebeu um cardápio enquanto você editava.",
+        action: "Recarregue o cardápio atual antes de salvar alterações.",
+      });
+    }
+  }
+
+  cdn.forget([...place.cacheTagsOf(values.place), cacheTag(values.place.id)]);
 
   return await findOneById(id);
 }
@@ -317,7 +366,10 @@ function formatDistance(meters) {
   return `${(meters / 1000).toFixed(1).replace(".", ",")} km`;
 }
 
-async function parseInput(input) {
+async function parseInput(
+  input,
+  { allowHiddenPlace = false, allowPosition = true } = {},
+) {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new ValidationError({
       message: "O cardápio precisa ser um objeto.",
@@ -325,22 +377,24 @@ async function parseInput(input) {
     });
   }
 
-  rejectUnknownKeys(
-    input,
-    ["place_id", "currency", "sections", "replaces", "position"],
-    "no cardápio",
-  );
+  const allowedKeys = allowPosition
+    ? ["place_id", "currency", "sections", "replaces", "position"]
+    : ["place_id", "currency", "sections", "replaces"];
+
+  rejectUnknownKeys(input, allowedKeys, "no cardápio");
 
   const replaces = parseReplaces(input.replaces);
 
-  if (input.position !== undefined && replaces === null) {
+  if (allowPosition && input.position !== undefined && replaces === null) {
     throw new ValidationError({
       message: "A posição só vale para trocar um cardápio.",
       action: "Envie position junto de replaces, ou tire-a.",
     });
   }
   const position =
-    input.position === undefined ? null : parsePosition(input.position);
+    allowPosition && input.position !== undefined
+      ? parsePosition(input.position)
+      : null;
 
   if (!CURRENCIES.includes(input.currency)) {
     throw new ValidationError({
@@ -424,7 +478,9 @@ async function parseInput(input) {
 
   // Por último, porque é a única conferência que vai ao banco: pedido torto
   // volta 400 sem gastar a consulta.
-  const target = await findVisiblePlace(input.place_id);
+  const target = allowHiddenPlace
+    ? await place.findOneById(input.place_id)
+    : await findVisiblePlace(input.place_id);
 
   return {
     place: target,
@@ -629,10 +685,11 @@ async function findLatestByPlaceId(placeId) {
     });
   }
 
-  // Onde fica o lugar: é dali que o aplicativo mede o raio de quem quer
-  // fotografar o cardápio de novo — ver `create`.
+  // Nome e coordenadas do lugar: alimentam o cabeçalho de deep links
+  // `/cardapio/<id>` e a checagem de distância para fotografar de novo.
   return {
     ...result.rows[0],
+    place_name: target.name,
     place_location: { latitude: target.latitude, longitude: target.longitude },
   };
 }
@@ -861,12 +918,20 @@ const SELECT_MENU = `
     menus
 `;
 
+function cacheTag(placeId) {
+  return `menu-${placeId}`;
+}
+
 const menu = {
   create,
+  saveByAdmin,
   canEditText,
+  cacheTag,
   findLatestByPlaceId,
   findPlaces,
   findPlacesByCreator,
+  SELECT_MENU,
+  SELECT_PLACE_WITH_MENU,
 };
 
 export default menu;

@@ -1,20 +1,22 @@
 import { InternalServerError } from "infra/errors.js";
+import { ADMIN_PANEL_FEATURES } from "models/features.js";
 
 const availableFeatures = [
   // ADMIN
-  // Marcador de quem modera o mapa. Não concede nada por si, como no
-  // repositório judhagsan: cada ação continua exigindo a sua feature granular
-  // (`manage:place` e companhia). "Enxerga a moderação" e "pode aceitar uma
-  // sugestão" são perguntas diferentes, e quem ganhar uma por um motivo
-  // pontual não herda a outra sem ninguém ter decidido isso.
+  // Marcador de quem modera e administra o painel. Não concede nada por si,
+  // como no repositório judhagsan: cada ação continua exigindo a sua feature
+  // granular (`manage:place`, `manage:menu`, etc.).
   "admin",
+  "manage:admins",
 
   // USER
   "create:user",
   "read:user",
   "read:user:self",
+  "read:user:admin",
   "update:user",
   "update:user:others",
+  "erase:user:others",
 
   // SESSION
   "create:session",
@@ -46,6 +48,12 @@ const availableFeatures = [
   // repositório judhagsan.
   "read:place_suggestion",
 
+  // SUPPORT
+  // Atender solicitações de locais faltantes e pedidos de ajuda pelo painel.
+  "manage:support",
+  // Chave de formatação do `filterOutput` para solicitações de suporte.
+  "read:support_request",
+
   // MENU
   // Mandar o cardápio de um lugar, e antes disso ler a folha: a rota de
   // leitura (`POST /api/v1/vision/read`) exige a mesma feature, porque quem
@@ -54,6 +62,9 @@ const availableFeatures = [
   // Chave de formatação do `filterOutput`, como a `read:place_suggestion`:
   // ler o cardápio de um lugar é público, e nenhuma rota exige esta feature.
   "read:menu",
+  // Editar ou substituir qualquer cardápio pelo painel administrativo, sem
+  // trava de distância ou autoria original.
+  "manage:menu",
 ];
 
 function can(user, feature, resource) {
@@ -109,6 +120,18 @@ function filterOutput(user, feature, resource) {
     }
   }
 
+  if (feature === "read:user:admin") {
+    return {
+      id: resource.id,
+      username: resource.username,
+      email: resource.email,
+      features: resource.features,
+      created_at: resource.created_at,
+      updated_at: resource.updated_at,
+      deleted_at: resource.deleted_at ?? null,
+    };
+  }
+
   if (feature === "read:session") {
     if (user.id === resource.user_id) {
       return {
@@ -151,6 +174,56 @@ function filterOutput(user, feature, resource) {
     };
   }
 
+  if (feature === "read:support_request") {
+    if (can(user, "manage:support")) {
+      return {
+        id: resource.id,
+        category: resource.category,
+        status: resource.status,
+        user_id: resource.user_id ?? null,
+        user_username: resource.user_username ?? null,
+        contact_name: resource.contact_name ?? null,
+        contact_email: resource.contact_email ?? null,
+        account_identifier: resource.account_identifier ?? null,
+        subject: resource.subject ?? null,
+        message: resource.message ?? null,
+        place_name: resource.place_name ?? null,
+        approximate_address: resource.approximate_address ?? null,
+        latitude: resource.latitude ?? null,
+        longitude: resource.longitude ?? null,
+        metadata: resource.metadata ?? {},
+        resolved_place_id: resource.resolved_place_id ?? null,
+        resolved_place_name: resource.resolved_place_name ?? null,
+        handled_by: resource.handled_by ?? null,
+        handled_username: resource.handled_username ?? null,
+        resolution_note: resource.resolution_note ?? null,
+        handled_at: resource.handled_at ?? null,
+        resolved_at: resource.resolved_at ?? null,
+        created_at: resource.created_at,
+        updated_at: resource.updated_at,
+      };
+    }
+
+    if (user.id && resource.user_id === user.id) {
+      return {
+        id: resource.id,
+        category: resource.category,
+        status: resource.status,
+        subject: resource.subject ?? null,
+        message: resource.message ?? null,
+        place_name: resource.place_name ?? null,
+        approximate_address: resource.approximate_address ?? null,
+        latitude: resource.latitude ?? null,
+        longitude: resource.longitude ?? null,
+        resolved_place_id: resource.resolved_place_id ?? null,
+        resolution_note: resource.resolution_note ?? null,
+        resolved_at: resource.resolved_at ?? null,
+        created_at: resource.created_at,
+        updated_at: resource.updated_at,
+      };
+    }
+  }
+
   // Quem mandou não sai: o cardápio é do lugar, e quem lê não tem por que
   // saber de que conta ele veio. O que sai é só se QUEM LÊ pode mudar o
   // texto dele (`can_edit`), quando a rota o calculou — ver
@@ -159,6 +232,7 @@ function filterOutput(user, feature, resource) {
     return {
       id: resource.id,
       place_id: resource.place_id,
+      place_name: resource.place_name,
       currency: resource.currency,
       sections: resource.sections,
       created_at: resource.created_at,
@@ -224,6 +298,8 @@ function validateResource(resource) {
 }
 
 const authorization = {
+  ADMIN_PANEL_FEATURES,
+  availableFeatures,
   can,
   filterOutput,
 };

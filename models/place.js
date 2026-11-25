@@ -1,6 +1,8 @@
+import crypto from "node:crypto";
 import database from "infra/database.js";
+import cdn from "infra/cdn.js";
 import tile from "models/tile.js";
-import { NotFoundError, ValidationError } from "infra/errors.js";
+import { ConflictError, NotFoundError, ValidationError } from "infra/errors.js";
 
 // Abaixo de 14 um tile cobre uma cidade inteira, e a resposta seria de
 // milhares de lugares que o aplicativo não teria como desenhar sem virar uma
@@ -267,6 +269,11 @@ function cacheTagsOf({ latitude, longitude }) {
   return tags;
 }
 
+// Etiqueta da página pública de compartilhamento do lugar na borda.
+function shareCacheTag(id) {
+  return `place-share-${id}`;
+}
+
 // Um lugar pelo id, visível ou não — quem chama decide o que fazer com o
 // oculto. Sem o lugar, `NotFoundError`, com o texto que o aplicativo mostra.
 async function findOneById(id) {
@@ -300,11 +307,633 @@ async function findOneById(id) {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const BRAZIL = { west: -75, south: -35, east: -32, north: 6 };
+const TEXT_FIELDS = [
+  "name",
+  "category",
+  "street",
+  "neighborhood",
+  "postcode",
+  "locality",
+  "region",
+];
+const OPTIONAL_TEXT_FIELDS = TEXT_FIELDS.filter((field) => field !== "name");
+const ADMIN_PLACE_FIELDS = [...TEXT_FIELDS, "latitude", "longitude"];
+const MAX_TEXT_LENGTH = 200;
+const ADMIN_PAGE_MAX = 50;
+const ADMIN_HIDDEN_REASONS = [
+  "admin_removed",
+  "reported_closed",
+  "reported_duplicate",
+  "closed",
+  "duplicate",
+];
+
 function placeNotFound() {
   return new NotFoundError({
     message: "O lugar informado não foi encontrado.",
     action: "Verifique se o lugar ainda aparece no mapa e tente de novo.",
   });
+}
+
+function parseAdminPlaceInput(input, { requireCoreFields = true } = {}) {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new ValidationError({
+      message: "Os dados do estabelecimento precisam ser um objeto.",
+      action: `Envie apenas os campos do local: ${ADMIN_PLACE_FIELDS.join(", ")}.`,
+    });
+  }
+
+  const unknown = Object.keys(input).filter(
+    (key) => !ADMIN_PLACE_FIELDS.includes(key),
+  );
+  if (unknown.length > 0) {
+    throw new ValidationError({
+      message: `Campo desconhecido no estabelecimento: ${unknown.join(", ")}.`,
+      action: `Use apenas: ${ADMIN_PLACE_FIELDS.join(", ")}.`,
+    });
+  }
+
+  const parsed = {};
+
+  if (requireCoreFields || input.name !== undefined) {
+    if (typeof input.name !== "string" || input.name.trim().length === 0) {
+      throw new ValidationError({
+        message: "O nome do estabelecimento não foi informado.",
+        action: "Informe um nome válido para o estabelecimento.",
+      });
+    }
+    const name = input.name.trim().normalize("NFC");
+    if (name.length > MAX_TEXT_LENGTH) {
+      throw new ValidationError({
+        message: `O nome passa de ${MAX_TEXT_LENGTH} caracteres.`,
+        action: "Encurte o nome e tente de novo.",
+      });
+    }
+    parsed.name = name;
+  }
+
+  for (const field of OPTIONAL_TEXT_FIELDS) {
+    if (input[field] === undefined) continue;
+    const raw = input[field];
+    if (raw === null || (typeof raw === "string" && raw.trim().length === 0)) {
+      parsed[field] = null;
+      continue;
+    }
+    if (typeof raw !== "string") {
+      throw new ValidationError({
+        message: `O campo "${field}" precisa ser um texto.`,
+        action: "Envie texto ou deixe o campo em branco.",
+      });
+    }
+    const text = raw.trim().normalize("NFC");
+    if (text.length > MAX_TEXT_LENGTH) {
+      throw new ValidationError({
+        message: `O campo "${field}" passa de ${MAX_TEXT_LENGTH} caracteres.`,
+        action: "Encurte o texto e tente de novo.",
+      });
+    }
+    parsed[field] = text;
+  }
+
+  const hasLat = input.latitude !== undefined;
+  const hasLon = input.longitude !== undefined;
+  if (hasLat !== hasLon || (requireCoreFields && !hasLat)) {
+    throw new ValidationError({
+      message: "A localização exige latitude e longitude juntas.",
+      action: "Informe latitude e longitude dentro do Brasil.",
+    });
+  }
+
+  if (hasLat) {
+    const latitude = Number(input.latitude);
+    const longitude = Number(input.longitude);
+    const inBrazil =
+      Number.isFinite(latitude) &&
+      Number.isFinite(longitude) &&
+      latitude >= BRAZIL.south &&
+      latitude <= BRAZIL.north &&
+      longitude >= BRAZIL.west &&
+      longitude <= BRAZIL.east;
+
+    if (!inBrazil) {
+      throw new ValidationError({
+        message: `A posição "${input.latitude},${input.longitude}" fica fora do Brasil.`,
+        action: "Confira no mapa se latitude e longitude não estão invertidas.",
+      });
+    }
+
+    parsed.latitude = latitude;
+    parsed.longitude = longitude;
+  }
+
+  return parsed;
+}
+
+function normalizeAdminPagination(query) {
+  const rawPage = Number.parseInt(query?.page ?? "1", 10);
+  const rawLimit = Number.parseInt(query?.limit ?? "25", 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), ADMIN_PAGE_MAX)
+    : 25;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+function addPlaceTermCondition(
+  term,
+  mode,
+  visibility,
+  conditions,
+  values,
+  { matchId = false } = {},
+) {
+  const likeValue = `%${escapeLike(term)}%`;
+  values.push(likeValue);
+  const p = `$${values.length}`;
+
+  const nameMatch =
+    visibility === "visible"
+      ? `sem_acento(places.name) ILIKE sem_acento(${p}) ESCAPE '\\'`
+      : visibility === "hidden"
+        ? `sem_acento(places.name) ILIKE sem_acento(${p}) ESCAPE '\\'`
+        : `((places.hidden_at IS NULL AND sem_acento(places.name) ILIKE sem_acento(${p}) ESCAPE '\\') OR (places.hidden_at IS NOT NULL AND sem_acento(places.name) ILIKE sem_acento(${p}) ESCAPE '\\'))`;
+
+  const addressMatch = `sem_acento_endereco(places.street, places.neighborhood, places.locality, places.region, places.postcode) ILIKE sem_acento(${p}) ESCAPE '\\'`;
+
+  const parts = [];
+  if (mode === "name" || mode === "both") {
+    parts.push(nameMatch);
+  }
+  if (mode === "address" || mode === "both") {
+    parts.push(addressMatch);
+  }
+  if (matchId && UUID_PATTERN.test(term)) {
+    values.push(term);
+    parts.push(`places.id = $${values.length}::uuid`);
+  }
+
+  conditions.push(`(${parts.join(" OR ")})`);
+}
+
+async function searchForAdmin(query = {}) {
+  const q = typeof query.q === "string" ? query.q.trim() : "";
+  const name = typeof query.name === "string" ? query.name.trim() : "";
+  const address = typeof query.address === "string" ? query.address.trim() : "";
+  const visibility = ["all", "visible", "hidden"].includes(query.visibility)
+    ? query.visibility
+    : "all";
+  const hasMenu = ["all", "true", "false"].includes(query.has_menu)
+    ? query.has_menu
+    : "all";
+  const { page, limit, offset } = normalizeAdminPagination(query);
+
+  const conditions = [];
+  const values = [];
+
+  if (visibility === "visible") {
+    conditions.push("places.hidden_at IS NULL");
+  } else if (visibility === "hidden") {
+    conditions.push("places.hidden_at IS NOT NULL");
+  }
+
+  if (q.length > 0) {
+    if (q.length < MIN_SEARCH_LENGTH && !UUID_PATTERN.test(q)) {
+      throw new ValidationError({
+        message: "A busca precisa de pelo menos duas letras.",
+        action: "Digite mais caracteres ou informe o UUID do estabelecimento.",
+      });
+    }
+    addPlaceTermCondition(q, "both", visibility, conditions, values, {
+      matchId: true,
+    });
+  }
+
+  if (name.length > 0) {
+    if (name.length < MIN_SEARCH_LENGTH) {
+      throw new ValidationError({
+        message: "O filtro de nome precisa de pelo menos duas letras.",
+        action: "Digite mais um caractere no campo de nome.",
+      });
+    }
+    addPlaceTermCondition(name, "name", visibility, conditions, values);
+  }
+
+  if (address.length > 0) {
+    if (address.length < MIN_SEARCH_LENGTH) {
+      throw new ValidationError({
+        message: "O filtro de endereço precisa de pelo menos duas letras.",
+        action: "Digite mais um caractere no campo de endereço.",
+      });
+    }
+    addPlaceTermCondition(address, "address", visibility, conditions, values);
+  }
+
+  if (hasMenu === "true") {
+    conditions.push("places.id IN (SELECT DISTINCT menus.place_id FROM menus)");
+  } else if (hasMenu === "false") {
+    conditions.push(
+      "NOT EXISTS (SELECT 1 FROM menus WHERE menus.place_id = places.id)",
+    );
+  }
+
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const isFiltered =
+    q.length > 0 ||
+    name.length > 0 ||
+    address.length > 0 ||
+    visibility === "hidden" ||
+    hasMenu === "true";
+
+  // Em listagem aberta sem filtro, evita count(*) e sort em 600 mil linhas.
+  const orderBy =
+    visibility === "hidden"
+      ? "ORDER BY places.hidden_at DESC, places.id DESC"
+      : isFiltered
+        ? "ORDER BY places.name ASC, places.id ASC"
+        : "ORDER BY places.id ASC";
+
+  let total = null;
+  if (isFiltered) {
+    const countResult = await database.query({
+      text: `SELECT count(*)::int AS total FROM places ${whereClause};`,
+      values,
+    });
+    total = countResult.rows[0].total;
+  }
+
+  const rowsResult = await database.query({
+    text: `
+      SELECT
+        places.id,
+        places.source,
+        places.source_id,
+        places.name,
+        places.category,
+        places.latitude,
+        places.longitude,
+        places.street,
+        places.neighborhood,
+        places.locality,
+        places.region,
+        places.postcode,
+        places.hidden_at,
+        places.hidden_reason,
+        places.duplicate_of,
+        places.created_at,
+        places.updated_at,
+        EXISTS (
+          SELECT 1 FROM menus WHERE menus.place_id = places.id
+        ) AS has_menu
+      FROM
+        places
+      ${whereClause}
+      ${orderBy}
+      LIMIT $${values.length + 1}
+      OFFSET $${values.length + 2}
+    ;`,
+    values: [...values, limit + 1, offset],
+  });
+
+  const hasNext = rowsResult.rows.length > limit;
+  const items = hasNext ? rowsResult.rows.slice(0, limit) : rowsResult.rows;
+
+  return {
+    items,
+    total,
+    has_next: hasNext,
+    page,
+    limit,
+  };
+}
+
+const MAX_ADMIN_VIEWPORT_SPAN = 0.15;
+
+// Consulta por janela visível para desenhar no mapa administrativo os locais já
+// existentes no banco (com ou sem cardápio, inclusive excluídos), sem o cache
+// de 1h da rota pública.
+async function findWithinViewportForAdmin(query = {}) {
+  const south = Number(query?.south);
+  const north = Number(query?.north);
+  const west = Number(query?.west);
+  const east = Number(query?.east);
+
+  const validNumbers =
+    Number.isFinite(south) &&
+    Number.isFinite(north) &&
+    Number.isFinite(west) &&
+    Number.isFinite(east) &&
+    south >= -LATITUDE_LIMIT &&
+    north <= LATITUDE_LIMIT &&
+    west >= -LONGITUDE_LIMIT &&
+    east <= LONGITUDE_LIMIT &&
+    south < north &&
+    west < east;
+
+  if (!validNumbers) {
+    throw new ValidationError({
+      message: "Os limites de área do mapa são inválidos.",
+      action: "Informe south, north, west e east válidos.",
+    });
+  }
+
+  if (
+    north - south > MAX_ADMIN_VIEWPORT_SPAN ||
+    east - west > MAX_ADMIN_VIEWPORT_SPAN
+  ) {
+    throw new ValidationError({
+      message: "A área solicitada é grande demais para listar locais no mapa.",
+      action: "Aproxime mais o zoom do mapa (nível 14 ou superior).",
+    });
+  }
+
+  const results = await database.query({
+    text: `
+      SELECT
+        places.id,
+        places.name,
+        places.category,
+        places.latitude,
+        places.longitude,
+        places.street,
+        places.neighborhood,
+        places.locality,
+        places.region,
+        places.hidden_at,
+        places.hidden_reason,
+        EXISTS (
+          SELECT 1 FROM menus WHERE menus.place_id = places.id
+        ) AS has_menu
+      FROM
+        places
+      WHERE
+        places.latitude BETWEEN $1 AND $2
+        AND places.longitude BETWEEN $3 AND $4
+      ORDER BY
+        (places.hidden_at IS NULL) DESC,
+        places.id ASC
+      LIMIT
+        $5
+    ;`,
+    values: [south, north, west, east, MAX_PLACES_PER_TILE],
+  });
+
+  return results.rows;
+}
+
+async function createByAdmin(input) {
+  const values = parseAdminPlaceInput(input, { requireCoreFields: true });
+  const id = crypto.randomUUID();
+  const overrides = {};
+  for (const field of ADMIN_PLACE_FIELDS) {
+    if (values[field] !== undefined && values[field] !== null) {
+      overrides[field] = values[field];
+    }
+  }
+
+  const result = await database.query({
+    text: `
+      INSERT INTO
+        places (
+          id, source, source_id, name, category, latitude, longitude,
+          street, neighborhood, postcode, locality, region, overrides
+        )
+      VALUES
+        ($1, 'admin', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      RETURNING
+        *
+    ;`,
+    values: [
+      id,
+      id,
+      values.name,
+      values.category ?? null,
+      values.latitude,
+      values.longitude,
+      values.street ?? null,
+      values.neighborhood ?? null,
+      values.postcode ?? null,
+      values.locality ?? null,
+      values.region ?? null,
+      JSON.stringify(overrides),
+    ],
+  });
+
+  const created = result.rows[0];
+  cdn.forget(cacheTagsOf(created));
+  return created;
+}
+
+async function updateByAdmin(id, input) {
+  await findOneById(id);
+  const changes = parseAdminPlaceInput(input, { requireCoreFields: false });
+  const fields = Object.keys(changes);
+
+  if (fields.length === 0) {
+    throw new ValidationError({
+      message: "Nenhum campo do estabelecimento foi informado para alteração.",
+      action: `Envie ao menos um destes: ${ADMIN_PLACE_FIELDS.join(", ")}.`,
+    });
+  }
+
+  const { before, after } = await database.withTransaction(async (client) => {
+    const existing = await client.query({
+      text: "SELECT latitude, longitude, overrides FROM places WHERE id = $1 FOR UPDATE;",
+      values: [id],
+    });
+
+    if (existing.rowCount === 0) {
+      throw placeNotFound();
+    }
+
+    const currentOverrides = existing.rows[0].overrides || {};
+    const nextOverrides = { ...currentOverrides };
+    for (const field of fields) {
+      if (changes[field] === null) {
+        delete nextOverrides[field];
+      } else {
+        nextOverrides[field] = changes[field];
+      }
+    }
+
+    const assignments = fields.map(
+      (field, index) => `${field} = $${index + 3}`,
+    );
+    const updated = await client.query({
+      text: `
+        UPDATE
+          places
+        SET
+          ${assignments.join(",\n          ")},
+          overrides = $2::jsonb,
+          updated_at = timezone('utc', now())
+        WHERE
+          id = $1
+        RETURNING
+          *
+      ;`,
+      values: [
+        id,
+        JSON.stringify(nextOverrides),
+        ...fields.map((field) => changes[field]),
+      ],
+    });
+
+    return { before: existing.rows[0], after: updated.rows[0] };
+  });
+
+  const tags = [
+    ...new Set([
+      ...cacheTagsOf(before),
+      ...cacheTagsOf(after),
+      shareCacheTag(after.id),
+      `menu-${after.id}`,
+    ]),
+  ];
+  cdn.forget(tags);
+
+  return after;
+}
+
+async function hideByAdmin(
+  id,
+  { reason = "admin_removed", duplicateOf = null } = {},
+) {
+  const existing = await findOneById(id);
+
+  if (!ADMIN_HIDDEN_REASONS.includes(reason)) {
+    throw new ValidationError({
+      message: `O motivo de ocultação "${reason}" não é válido.`,
+      action: `Use um destes: ${ADMIN_HIDDEN_REASONS.join(", ")}.`,
+    });
+  }
+
+  const isDuplicate = reason === "duplicate" || reason === "reported_duplicate";
+  let targetDuplicateId = null;
+
+  if (isDuplicate) {
+    if (!duplicateOf || duplicateOf === existing.id) {
+      throw new ValidationError({
+        message: "Informe o outro estabelecimento que permanece ativo no mapa.",
+        action: "Selecione o ID de outro local válido para marcar duplicata.",
+      });
+    }
+    const kept = await findOneById(duplicateOf);
+    if (kept.hidden_at !== null) {
+      throw new ValidationError({
+        message: "O estabelecimento principal da duplicata também está oculto.",
+        action: "Escolha um estabelecimento visível no mapa.",
+      });
+    }
+    targetDuplicateId = kept.id;
+  }
+
+  const result = await database.query({
+    text: `
+      UPDATE
+        places
+      SET
+        hidden_at = timezone('utc', now()),
+        hidden_reason = $2,
+        duplicate_of = $3,
+        updated_at = timezone('utc', now())
+      WHERE
+        id = $1
+      RETURNING
+        *
+    ;`,
+    values: [existing.id, reason, targetDuplicateId],
+  });
+
+  const hidden = result.rows[0];
+  cdn.forget([
+    ...cacheTagsOf(hidden),
+    shareCacheTag(hidden.id),
+    `menu-${hidden.id}`,
+  ]);
+  return hidden;
+}
+
+async function restoreByAdmin(id) {
+  await findOneById(id);
+
+  const result = await database.query({
+    text: `
+      UPDATE
+        places
+      SET
+        hidden_at = NULL,
+        hidden_reason = NULL,
+        duplicate_of = NULL,
+        updated_at = timezone('utc', now())
+      WHERE
+        id = $1
+      RETURNING
+        *
+    ;`,
+    values: [id],
+  });
+
+  const restored = result.rows[0];
+  cdn.forget([
+    ...cacheTagsOf(restored),
+    shareCacheTag(restored.id),
+    `menu-${restored.id}`,
+  ]);
+  return restored;
+}
+
+async function erasePhysicalByAdmin(id) {
+  const existing = await findOneById(id);
+
+  if (existing.source !== "admin") {
+    throw new ConflictError({
+      message:
+        "Estabelecimentos importados ou sugeridos devem ser ocultados, e não apagados.",
+      action:
+        "Use a ocultação do painel para tirar o estabelecimento do mapa preservando o histórico.",
+    });
+  }
+
+  const deleted = await database.withTransaction(async (client) => {
+    const refCheck = await client.query({
+      text: `
+        SELECT
+          EXISTS (SELECT 1 FROM menus WHERE place_id = $1) AS has_menus,
+          EXISTS (
+            SELECT 1 FROM place_suggestions
+            WHERE place_id = $1 OR duplicate_of = $1
+          ) AS has_suggestions
+      ;`,
+      values: [existing.id],
+    });
+
+    if (refCheck.rows[0].has_menus || refCheck.rows[0].has_suggestions) {
+      throw new ConflictError({
+        message:
+          "Este local já possui cardápios ou sugestões vinculadas e precisa ser ocultado.",
+        action:
+          "Use a opção de ocultar para removê-lo do mapa sem perder o histórico.",
+      });
+    }
+
+    const removed = await client.query({
+      text: "DELETE FROM places WHERE id = $1 RETURNING *;",
+      values: [existing.id],
+    });
+
+    return removed.rows[0];
+  });
+
+  cdn.forget([
+    ...cacheTagsOf(deleted),
+    shareCacheTag(deleted.id),
+    `menu-${deleted.id}`,
+  ]);
+
+  return deleted;
 }
 
 const place = {
@@ -317,10 +946,18 @@ const place = {
   findWithinTile,
   cacheTag,
   cacheTagsOf,
+  shareCacheTag,
   parseSearch,
   parseOrigin,
   search,
+  searchForAdmin,
+  findWithinViewportForAdmin,
   findOneById,
+  createByAdmin,
+  updateByAdmin,
+  hideByAdmin,
+  restoreByAdmin,
+  erasePhysicalByAdmin,
   UUID_PATTERN,
 };
 

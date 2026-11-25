@@ -33,6 +33,7 @@ async function patchHandler(request, response) {
   const changed = await user.changeUsername({
     userId: userTryingToPatch.id,
     newUsername: input.username,
+    currentUser: userTryingToPatch,
   });
 
   await auditLog.record({

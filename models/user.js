@@ -1,6 +1,14 @@
 import database from "infra/database.js";
 import password from "models/password.js";
+import authorization from "models/authorization.js";
+import auditLog from "models/auditLog.js";
 import { ValidationError, NotFoundError } from "infra/errors.js";
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const EMAIL_MAX_LENGTH = 254;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const USER_ADMIN_LIST_MAX = 50;
 
 async function findOneById(id) {
   const userFound = await runSelectQuery(id);
@@ -96,8 +104,11 @@ async function findOneByEmail(email) {
 }
 
 async function create(userInputValues) {
-  await validateUniqueUsername(userInputValues.username);
-  await validateUniqueEmail(userInputValues.email);
+  validateCreateInput(userInputValues);
+  await validateUniqueUsernameAndEmail(
+    userInputValues.username,
+    userInputValues.email,
+  );
   await hashPasswordInObject(userInputValues);
   injectDefaultFeaturesInObject(userInputValues);
 
@@ -105,27 +116,105 @@ async function create(userInputValues) {
   return newUser;
 
   async function runInsertQuery(userInputValues) {
-    const results = await database.query({
-      text: `
-        INSERT INTO
-          users (username, email, password, features)
-        VALUES
-          ($1, $2, $3, $4)
-        RETURNING
-          *
-        ;`,
-      values: [
-        userInputValues.username,
-        userInputValues.email,
-        userInputValues.password,
-        userInputValues.features,
-      ],
-    });
-    return results.rows[0];
+    try {
+      const results = await database.query({
+        text: `
+          INSERT INTO
+            users (username, email, password, features)
+          VALUES
+            ($1, $2, $3, $4)
+          RETURNING
+            *
+          ;`,
+        values: [
+          userInputValues.username,
+          userInputValues.email,
+          userInputValues.password,
+          userInputValues.features,
+        ],
+      });
+      return results.rows[0];
+    } catch (error) {
+      if (error.cause?.code === "23505") {
+        const constraint = error.cause?.constraint || "";
+        if (constraint.includes("username")) {
+          throw usernameTakenError();
+        }
+        if (constraint.includes("email")) {
+          throw emailTakenError();
+        }
+      }
+      throw error;
+    }
   }
 
   function injectDefaultFeaturesInObject(userInputValues) {
     userInputValues.features = ["read:activation_token"];
+  }
+}
+
+function validateCreateInput(userInputValues) {
+  if (
+    typeof userInputValues?.username !== "string" ||
+    userInputValues.username.trim().length === 0
+  ) {
+    throw new ValidationError({
+      message: "O username não foi informado.",
+      action: "Informe um username para realizar o cadastro.",
+    });
+  }
+
+  if (
+    typeof userInputValues?.email !== "string" ||
+    userInputValues.email.trim().length === 0
+  ) {
+    throw new ValidationError({
+      message: "O email não foi informado.",
+      action: "Informe um email para realizar o cadastro.",
+    });
+  }
+
+  if (
+    typeof userInputValues?.password !== "string" ||
+    userInputValues.password.length === 0
+  ) {
+    throw new ValidationError({
+      message: "A senha não foi informada.",
+      action: "Informe uma senha para realizar o cadastro.",
+    });
+  }
+}
+
+async function validateUniqueUsernameAndEmail(username, email) {
+  const results = await database.query({
+    text: `
+      SELECT
+        EXISTS (
+          SELECT
+            1
+          FROM
+            users
+          WHERE
+            LOWER(username) = LOWER($1)
+        ) AS username_taken,
+        EXISTS (
+          SELECT
+            1
+          FROM
+            users
+          WHERE
+            LOWER(email) = LOWER($2)
+        ) AS email_taken
+    ;`,
+    values: [username, email],
+  });
+
+  if (results.rows[0].username_taken) {
+    throw usernameTakenError();
+  }
+
+  if (results.rows[0].email_taken) {
+    throw emailTakenError();
   }
 }
 
@@ -157,25 +246,11 @@ function usernameTakenError() {
   });
 }
 
-async function validateUniqueEmail(email) {
-  const results = await database.query({
-    text: `
-      SELECT
-        email
-      FROM
-        users
-      WHERE
-        LOWER(email) = LOWER($1)
-      ;`,
-    values: [email],
+function emailTakenError() {
+  return new ValidationError({
+    message: "O email informado já está sendo utilizado.",
+    action: "Utilize outro email para realizar esta operação.",
   });
-
-  if (results.rowCount > 0) {
-    throw new ValidationError({
-      message: "O email informado já está sendo utilizado.",
-      action: "Utilize outro email para realizar esta operação.",
-    });
-  }
 }
 
 async function hashPasswordInObject(userInputValues) {
@@ -283,6 +358,23 @@ async function erase(userId) {
       removed_recovery_tokens AS (
         DELETE FROM
           password_recovery_tokens
+        WHERE
+          user_id IN (SELECT id FROM erased)
+      ),
+      removed_email_change_tokens AS (
+        DELETE FROM
+          user_email_change_tokens
+        WHERE
+          user_id IN (SELECT id FROM erased)
+      ),
+      anonymized_support_requests AS (
+        UPDATE
+          support_requests
+        SET
+          contact_name = NULL,
+          contact_email = NULL,
+          account_identifier = NULL,
+          updated_at = timezone('utc', now())
         WHERE
           user_id IN (SELECT id FROM erased)
       ),
@@ -448,7 +540,7 @@ const USERNAME_MAX_LENGTH = 30;
 //
 // Não pede a senha, ao contrário da troca de senha: o nome não abre a conta,
 // e quem está com a sessão já pode fazer o que ele faria com ela.
-async function changeUsername({ userId, newUsername }) {
+async function changeUsername({ userId, newUsername, currentUser = null }) {
   if (typeof newUsername !== "string" || newUsername.trim().length === 0) {
     throw new ValidationError({
       message: "O nome de usuário não foi informado.",
@@ -464,15 +556,26 @@ async function changeUsername({ userId, newUsername }) {
     });
   }
 
-  const currentUser = await findOneById(userId);
-  if (currentUser.username === username) {
-    throw new ValidationError({
-      message: "O nome de usuário novo é igual ao atual.",
-      action: "Escolha um nome diferente do atual.",
-    });
+  if (currentUser) {
+    if (currentUser.username === username) {
+      throw new ValidationError({
+        message: "O nome de usuário novo é igual ao atual.",
+        action: "Escolha um nome diferente do atual.",
+      });
+    }
+    await validateUniqueUsername(username, userId);
+  } else {
+    const [storedUser] = await Promise.all([
+      findOneById(userId),
+      validateUniqueUsername(username, userId),
+    ]);
+    if (storedUser.username === username) {
+      throw new ValidationError({
+        message: "O nome de usuário novo é igual ao atual.",
+        action: "Escolha um nome diferente do atual.",
+      });
+    }
   }
-
-  await validateUniqueUsername(username, userId);
 
   let results;
   try {
@@ -511,6 +614,297 @@ async function changeUsername({ userId, newUsername }) {
   return results.rows[0];
 }
 
+function escapeLike(term) {
+  return term.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+function normalizeAndValidateEmail(rawEmail) {
+  if (typeof rawEmail !== "string" || rawEmail.trim().length === 0) {
+    throw new ValidationError({
+      message: "O email não foi informado.",
+      action: "Informe um email válido e tente de novo.",
+    });
+  }
+
+  const normalized = rawEmail.trim();
+  if (normalized.length > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.test(normalized)) {
+    throw new ValidationError({
+      message: "O email informado não é válido.",
+      action: "Confira o endereço de email e tente de novo.",
+    });
+  }
+
+  return normalized;
+}
+
+async function validateUniqueEmail(email, exceptUserId = null) {
+  const results = await database.query({
+    text: `
+      SELECT
+        id
+      FROM
+        users
+      WHERE
+        LOWER(email) = LOWER($1)
+        AND ($2::uuid IS NULL OR id <> $2::uuid)
+      LIMIT
+        1
+    ;`,
+    values: [email, exceptUserId],
+  });
+
+  if (results.rowCount > 0) {
+    throw emailTakenError();
+  }
+}
+
+function normalizePagination(query) {
+  const rawPage = Number.parseInt(query?.page ?? "1", 10);
+  const rawLimit = Number.parseInt(query?.limit ?? "25", 10);
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? rawPage : 1;
+  const limit = Number.isFinite(rawLimit)
+    ? Math.min(Math.max(rawLimit, 1), USER_ADMIN_LIST_MAX)
+    : 25;
+  return { page, limit, offset: (page - 1) * limit };
+}
+
+async function listForAdmin(query = {}) {
+  const q = typeof query.q === "string" ? query.q.trim() : "";
+  const filter = ["all", "active", "pending", "admin", "deleted"].includes(
+    query.filter,
+  )
+    ? query.filter
+    : "all";
+  const { page, limit, offset } = normalizePagination(query);
+
+  const conditions = [];
+  const values = [];
+
+  if (filter === "active") {
+    conditions.push(
+      "users.deleted_at IS NULL AND 'create:session' = ANY(users.features)",
+    );
+  } else if (filter === "pending") {
+    conditions.push(
+      "users.deleted_at IS NULL AND 'read:activation_token' = ANY(users.features)",
+    );
+  } else if (filter === "admin") {
+    conditions.push(
+      "users.deleted_at IS NULL AND 'admin' = ANY(users.features)",
+    );
+  } else if (filter === "deleted") {
+    conditions.push("users.deleted_at IS NOT NULL");
+  }
+
+  if (q.length > 0) {
+    values.push(`%${escapeLike(q)}%`);
+    const likeParam = `$${values.length}`;
+    if (UUID_PATTERN.test(q)) {
+      values.push(q);
+      const idParam = `$${values.length}`;
+      conditions.push(
+        `(users.id = ${idParam}::uuid OR LOWER(users.username) LIKE LOWER(${likeParam}) ESCAPE '\\' OR LOWER(users.email) LIKE LOWER(${likeParam}) ESCAPE '\\')`,
+      );
+    } else {
+      conditions.push(
+        `(LOWER(users.username) LIKE LOWER(${likeParam}) ESCAPE '\\' OR LOWER(users.email) LIKE LOWER(${likeParam}) ESCAPE '\\')`,
+      );
+    }
+  }
+
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const countResult = await database.query({
+    text: `SELECT count(*)::int AS total FROM users ${whereClause};`,
+    values,
+  });
+
+  const rowsResult = await database.query({
+    text: `
+      SELECT
+        users.id,
+        users.username,
+        users.email,
+        users.features,
+        users.created_at,
+        users.updated_at,
+        users.deleted_at,
+        (SELECT count(*)::int FROM menus WHERE menus.created_by = users.id) AS menus_count,
+        (SELECT count(*)::int FROM place_suggestions WHERE place_suggestions.created_by = users.id) AS suggestions_count
+      FROM
+        users
+      ${whereClause}
+      ORDER BY
+        users.created_at DESC,
+        users.id DESC
+      LIMIT $${values.length + 1}
+      OFFSET $${values.length + 2}
+    ;`,
+    values: [...values, limit, offset],
+  });
+
+  return {
+    items: rowsResult.rows,
+    total: countResult.rows[0].total,
+    page,
+    limit,
+  };
+}
+
+async function findAdminDetailById(userId) {
+  if (typeof userId !== "string" || !UUID_PATTERN.test(userId)) {
+    throw new NotFoundError({
+      message: "O id informado não foi encontrado no sistema.",
+      action: "Verifique se o id está digitado corretamente.",
+    });
+  }
+
+  const userResult = await database.query({
+    text: `
+      SELECT
+        id,
+        username,
+        email,
+        features,
+        created_at,
+        updated_at,
+        deleted_at
+      FROM
+        users
+      WHERE
+        id = $1
+      LIMIT
+        1
+    ;`,
+    values: [userId],
+  });
+
+  if (userResult.rowCount === 0) {
+    throw new NotFoundError({
+      message: "O id informado não foi encontrado no sistema.",
+      action: "Verifique se o id está digitado corretamente.",
+    });
+  }
+
+  const target = userResult.rows[0];
+
+  const [menusResult, suggestionsResult, logs, pendingEmailResult] =
+    await Promise.all([
+      database.query({
+        text: `
+          SELECT
+            menus.id,
+            menus.place_id,
+            places.name AS place_name,
+            menus.currency,
+            menus.created_at
+          FROM
+            menus
+            INNER JOIN places ON places.id = menus.place_id
+          WHERE
+            menus.created_by = $1
+          ORDER BY
+            menus.created_at DESC
+          LIMIT 20
+        ;`,
+        values: [target.id],
+      }),
+      database.query({
+        text: `
+          SELECT
+            id,
+            kind,
+            place_id,
+            status,
+            changes,
+            created_at
+          FROM
+            place_suggestions
+          WHERE
+            created_by = $1
+          ORDER BY
+            created_at DESC
+          LIMIT 20
+        ;`,
+        values: [target.id],
+      }),
+      auditLog.findByUserId(target.id, { limit: 40 }),
+      database.query({
+        text: `
+          SELECT
+            id,
+            new_email,
+            expires_at,
+            created_at
+          FROM
+            user_email_change_tokens
+          WHERE
+            user_id = $1
+            AND used_at IS NULL
+            AND expires_at > NOW()
+          ORDER BY
+            created_at DESC
+          LIMIT 1
+        ;`,
+        values: [target.id],
+      }),
+    ]);
+
+  return {
+    ...target,
+    recent_menus: menusResult.rows,
+    recent_suggestions: suggestionsResult.rows,
+    audit_logs: logs,
+    pending_email_change: pendingEmailResult.rows[0] ?? null,
+  };
+}
+
+async function updateFeaturesByAdmin(userId, nextFeatures) {
+  if (!Array.isArray(nextFeatures)) {
+    throw new ValidationError({
+      message: "A lista de permissões é inválida.",
+      action: "Envie um array válido de features.",
+    });
+  }
+
+  const deduplicated = [...new Set(nextFeatures)];
+  const invalid = deduplicated.filter(
+    (feature) => !authorization.availableFeatures.includes(feature),
+  );
+  if (invalid.length > 0) {
+    throw new ValidationError({
+      message: `Permissão desconhecida: ${invalid.join(", ")}.`,
+      action: "Informe apenas permissões reconhecidas pelo sistema.",
+    });
+  }
+
+  const results = await database.query({
+    text: `
+      UPDATE
+        users
+      SET
+        features = $2,
+        updated_at = timezone('utc', now())
+      WHERE
+        id = $1
+        AND deleted_at IS NULL
+      RETURNING
+        id, username, email, features, created_at, updated_at, deleted_at
+    ;`,
+    values: [userId, deduplicated],
+  });
+
+  if (results.rowCount === 0) {
+    throw new NotFoundError({
+      message: "A conta informada não foi encontrada ou foi excluída.",
+      action: "Atualize a listagem de usuários e tente de novo.",
+    });
+  }
+
+  return results.rows[0];
+}
+
 const user = {
   create,
   findOneById,
@@ -518,10 +912,18 @@ const user = {
   findOneByEmail,
   setFeatures,
   addFeatures,
+  updateFeaturesByAdmin,
   changePassword,
   validateNewPassword,
+  validateUniqueUsername,
+  normalizeAndValidateEmail,
+  validateUniqueEmail,
+  listForAdmin,
+  findAdminDetailById,
   changeUsername,
   erase,
+  USERNAME_MAX_LENGTH,
+  UUID_PATTERN,
 };
 
 export default user;

@@ -13,6 +13,16 @@ beforeAll(async () => {
 
 describe("POST /api/v1/sessions", () => {
   describe("Anonymous user", () => {
+    test("Without body", async () => {
+      const response = await fetch(`${webserver.origin}/api/v1/sessions`, {
+        method: "POST",
+      });
+
+      expect(response.status).toBe(401);
+      const responseBody = await response.json();
+      expect(responseBody.name).toBe("UnauthorizedError");
+    });
+
     test("With incorrect `email` but correct `password`", async () => {
       await orchestrator.createUser({
         password: "senha-correta",

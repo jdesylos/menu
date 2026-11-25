@@ -6,10 +6,10 @@ import termos from "models/termos.js";
 // aplicativo (ver `models/termos.js`).
 
 export async function getStaticProps() {
-  return { props: { blocos: termos.ler() } };
+  return { props: { grupos: agrupar(termos.ler()) } };
 }
 
-// Os itens seguidos viram uma lista só.
+// Os itens seguidos viram uma lista só, pré-agrupados em build time.
 function agrupar(blocos) {
   const grupos = [];
   for (const bloco of blocos) {
@@ -25,22 +25,22 @@ function agrupar(blocos) {
   return grupos;
 }
 
-export default function Privacidade({ blocos }) {
+export default function Privacidade({ grupos }) {
   return (
     <PaginaDeTexto
       aba="Termos e privacidade"
       descricao="Os termos de uso e a política de privacidade do aplicativo Menu Spoiler: o que coletamos, para que usamos, com quem compartilhamos e como apagar a conta."
       titulo="Termos de uso e política de privacidade"
     >
-      {agrupar(blocos).map((grupo, indice) => {
+      {grupos.map((grupo, indice) => {
         if (grupo.tipo === "titulo") {
           return <h2 key={indice}>{grupo.texto}</h2>;
         }
         if (grupo.tipo === "lista") {
           return (
             <ul key={indice}>
-              {grupo.itens.map((item) => (
-                <li key={item}>{item}</li>
+              {grupo.itens.map((item, itemIndice) => (
+                <li key={`${indice}-${itemIndice}`}>{item}</li>
               ))}
             </ul>
           );

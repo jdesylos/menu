@@ -52,10 +52,15 @@ function onErrorHandler(error, request, response) {
   response.status(publicErrorObject.statusCode).json(publicErrorObject);
 }
 
-function setSessionCookie(sessionToken, response) {
+function setSessionCookie(sessionToken, response, { maxAgeSeconds } = {}) {
+  const maxAge =
+    typeof maxAgeSeconds === "number"
+      ? maxAgeSeconds
+      : session.EXPIRATION_IN_MILLISECONDS / 1000;
+
   const setCookie = cookie.serialize("session_id", sessionToken, {
     path: "/",
-    maxAge: session.EXPIRATION_IN_MILLISECONDS / 1000,
+    maxAge,
     secure: process.env.NODE_ENV === "production",
     httpOnly: true,
     sameSite: "lax",
@@ -103,6 +108,7 @@ async function injectAuthenticatedUser(request) {
 
   request.context = {
     ...request.context,
+    session: sessionObject,
     user: userObject,
   };
 }
