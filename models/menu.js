@@ -685,10 +685,11 @@ async function findLatestByPlaceId(placeId) {
     });
   }
 
-  // Onde fica o lugar: é dali que o aplicativo mede o raio de quem quer
-  // fotografar o cardápio de novo — ver `create`.
+  // Nome e coordenadas do lugar: alimentam o cabeçalho de deep links
+  // `/cardapio/<id>` e a checagem de distância para fotografar de novo.
   return {
     ...result.rows[0],
+    place_name: target.name,
     place_location: { latitude: target.latitude, longitude: target.longitude },
   };
 }

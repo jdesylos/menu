@@ -82,6 +82,7 @@ describe("GET /api/v1/menus", () => {
       expect(body).toEqual({
         id: sent.id,
         place_id: placeId,
+        place_name: "Bar com Cardápio",
         currency: "BRL",
         created_at: sent.created_at,
         sections: [

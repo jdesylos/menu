@@ -232,6 +232,7 @@ function filterOutput(user, feature, resource) {
     return {
       id: resource.id,
       place_id: resource.place_id,
+      place_name: resource.place_name,
       currency: resource.currency,
       sections: resource.sections,
       created_at: resource.created_at,
